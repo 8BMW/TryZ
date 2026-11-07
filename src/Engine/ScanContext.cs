@@ -24,6 +24,8 @@ internal sealed class ScanContext : IDisposable
     private readonly object _rateLock = new();
     private readonly object _pauseLock = new();
     private readonly HashSet<string> _findingKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentQueue<Finding> _findings = new();
+    private readonly ConcurrentDictionary<string, byte> _hostnames = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<IpRange> _exclusions = new();
     private readonly ConcurrentDictionary<string, IPAddress> _pins = new(StringComparer.OrdinalIgnoreCase);
     private readonly double[] _phase = new double[5];
@@ -242,10 +244,11 @@ internal sealed class ScanContext : IDisposable
 
     /// <summary>Adds a finding unless an identical (title, host, port) finding was already reported. Returns false for duplicates.</summary>
     public bool AddFinding(Severity severity, string title, string host, int port, int cwe,
-        string description, string evidence, string remediation)
+        string description, string evidence, string remediation, FindingDetails? details = null)
     {
+        string proto = details?.Proto is { Length: > 0 } p ? p : "tcp";
         lock (_findingKeys)
-            if (!_findingKeys.Add($"{title}|{host}|{port}")) return false;
+            if (!_findingKeys.Add($"{title}|{host}|{proto}/{port}")) return false;
         var f = new Finding
         {
             Id = Interlocked.Increment(ref _findingId),
@@ -257,7 +260,14 @@ internal sealed class ScanContext : IDisposable
             Description = description,
             Evidence = evidence.Length > 4000 ? evidence[..4000] + " ..." : evidence,
             Remediation = remediation,
+            RuleId = details?.RuleId is { Length: > 0 } id ? id : FindingDetails.Slug(title),
+            Proto = proto,
+            Product = details?.Product ?? string.Empty,
+            Cves = details?.Cves ?? Array.Empty<string>(),
+            Cvss = details?.Cvss,
+            CvssVector = details?.CvssVector ?? string.Empty,
         };
+        _findings.Enqueue(f);
         Emit(new FindingFound(f));
         var level = severity >= Severity.High ? LogLevel.Alert : severity == Severity.Medium ? LogLevel.Warn : LogLevel.Notice;
         Log(level, "audit", $"[{severity}] {title} on {host}{(port > 0 ? ":" + port : string.Empty)} (CWE-{cwe})");
@@ -265,6 +275,21 @@ internal sealed class ScanContext : IDisposable
     }
 
     public int FindingCount => Volatile.Read(ref _findingId);
+
+    /// <summary>
+    /// Findings reported so far, in report order. The objects are shared with the UI thread: treat them as read-only here
+    /// and publish changes through a <see cref="FindingEnriched"/> event.
+    /// </summary>
+    public IReadOnlyList<Finding> FindingsSnapshot() => _findings.ToArray();
+
+    /// <summary>Records a DNS name seen during the scan (typed by the user, from certificates or from crawled links).</summary>
+    public void NoteHostname(string name)
+    {
+        name = name.Trim().TrimEnd('.').ToLowerInvariant();
+        if (name.Length is > 0 and <= 253 && !IPAddress.TryParse(name, out _)) _hostnames.TryAdd(name, 0);
+    }
+
+    public IReadOnlyCollection<string> ObservedHostnames => _hostnames.Keys.ToArray();
 
     /// <summary>
     /// Reports progress for a phase. Progress only moves forward: parallel workers can report out of order,

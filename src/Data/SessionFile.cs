@@ -6,7 +6,8 @@ namespace TryZ.Data;
 /// <summary>On-disk form of a session (*.tzs, UTF-8 JSON).</summary>
 internal sealed class SessionFile
 {
-    public const int CurrentFormat = 1;
+    /// <summary>1: original layout. 2: findings carry rule id, protocol, product, CVEs, CVSS and threat data.</summary>
+    public const int CurrentFormat = 2;
 
     public int Format { get; set; } = CurrentFormat;
     public string Producer { get; set; } = "TryZ Security Suite";
@@ -102,6 +103,39 @@ internal sealed class FindingDto
     public string Evidence { get; set; } = string.Empty;
     public string Remediation { get; set; } = string.Empty;
     public FindingStatus Status { get; set; }
+    // Format 2
+    public string RuleId { get; set; } = string.Empty;
+    public string Proto { get; set; } = "tcp";
+    public string Product { get; set; } = string.Empty;
+    public List<string> Cves { get; set; } = new();
+    public double? Cvss { get; set; }
+    public string CvssVector { get; set; } = string.Empty;
+    public ThreatDto? Threat { get; set; }
+}
+
+internal sealed class ThreatDto
+{
+    public bool Kev { get; set; }
+    public string KevCve { get; set; } = string.Empty;
+    public DateOnly? KevDateAdded { get; set; }
+    public DateOnly? KevDueDate { get; set; }
+    public bool KevRansomware { get; set; }
+    public string KevAction { get; set; } = string.Empty;
+    public double? Epss { get; set; }
+    public double? EpssPercentile { get; set; }
+
+    public static ThreatDto From(ThreatInfo t) => new()
+    {
+        Kev = t.Kev, KevCve = t.KevCve, KevDateAdded = t.KevDateAdded, KevDueDate = t.KevDueDate,
+        KevRansomware = t.KevRansomware, KevAction = t.KevAction, Epss = t.Epss, EpssPercentile = t.EpssPercentile,
+    };
+
+    public ThreatInfo ToInfo() => new()
+    {
+        Kev = Kev, KevCve = KevCve ?? string.Empty, KevDateAdded = KevDateAdded, KevDueDate = KevDueDate,
+        KevRansomware = KevRansomware, KevAction = KevAction ?? string.Empty,
+        Epss = Epss is >= 0 and <= 1 ? Epss : null, EpssPercentile = EpssPercentile is >= 0 and <= 1 ? EpssPercentile : null,
+    };
 }
 
 internal sealed class UrlDto

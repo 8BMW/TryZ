@@ -374,6 +374,11 @@ internal sealed class OptionsDialog : SkinDialog
     private SkinSpin _crawlDepth = null!;
     private SkinCheck _robots = null!;
     private TextField _userAgent = null!;
+    private SkinCheck _udp = null!;
+    private SkinCheck _intel = null!;
+    private SkinCheck _takeover = null!;
+    private SkinCheck _customRules = null!;
+    private TextField _rulesDir = null!;
     private SkinList _authorizedList = null!;
     private TextField _footer = null!;
 
@@ -392,6 +397,9 @@ internal sealed class OptionsDialog : SkinDialog
         AddPage(scan, "Authorized Targets", BuildAuthorized());
         var engine = AddPage(null, "Engine", BuildEngine());
         AddPage(engine, "Web Crawler", BuildCrawler());
+        AddPage(engine, "UDP Services", BuildUdp());
+        AddPage(engine, "Threat Intelligence", BuildIntel());
+        AddPage(engine, "Detection Rules", BuildRules());
         AddPage(null, "Logging", BuildLogging());
         AddPage(null, "Reports", BuildReports());
         scan.Expanded = true;
@@ -590,7 +598,38 @@ internal sealed class OptionsDialog : SkinDialog
         _userAgent = http.Add("User-Agent", new TextField(cue: "User-Agent header sent with every HTTP request") { Mono = true });
         _userAgent.Value = _settings.UserAgent ?? string.Empty;
         http.Add(null, Note("The Quick Audit profile limits the crawl to 200 pages."), height: 17);
-        return Stack(g, http);
+
+        var dns = new EtchedGroup("DNS Names");
+        _takeover = dns.Add(null, new SkinCheck("Check names seen during the scan for dangling CNAME records", _settings.CheckTakeover), height: 17);
+        dns.Add(null, Note("Covers typed host names, certificate names and links found by the crawler. A CNAME that points at an unclaimed cloud resource can be taken over by anyone."), height: 44);
+        return Stack(g, http, dns);
+    }
+
+    private Control BuildUdp()
+    {
+        var g = new EtchedGroup("UDP Service Probes");
+        _udp = g.Add(null, new SkinCheck("Probe common UDP services after the TCP sweep", _settings.UdpScan), height: 17);
+        g.Add(null, Note("Sends a protocol-correct request to each port (DNS, SNMP, NTP, SSDP, NetBIOS, IKE, ...), so a reply proves the service is there. Ports that stay silent are reported as open|filtered only in the log. Not used by the Web Only profile."), height: 58);
+        return Stack(g);
+    }
+
+    private Control BuildIntel()
+    {
+        var g = new EtchedGroup("Exploitation Data");
+        _intel = g.Add(null, new SkinCheck("Annotate CVE findings with CISA KEV and FIRST EPSS data", _settings.EnableThreatIntel), height: 17);
+        g.Add(null, Note("The KEV catalog is downloaded from cisa.gov and cached for 24 hours. EPSS scores are requested from api.first.org with the CVE identifiers only; no host data leaves this machine."), height: 44);
+        return Stack(g);
+    }
+
+    private Control BuildRules()
+    {
+        var g = new EtchedGroup("Custom Rule Files");
+        g.LabelWidth = 60;
+        _customRules = g.Add(null, new SkinCheck("Load rule files (*.json, *.yaml) in addition to the built-in rules", _settings.UseCustomRules), height: 17);
+        _rulesDir = g.Add("Folder", new TextField(cue: Engine.ScanOptions.DefaultRulesDirectory) { Mono = true });
+        _rulesDir.Value = _settings.RulesDirectory ?? string.Empty;
+        g.Add(null, Note("Rules are read when a scan starts. Files that fail to parse are skipped and reported in the activity log with the line number."), height: 30);
+        return Stack(g);
     }
 
     private Control BuildLogging()
@@ -649,6 +688,11 @@ internal sealed class OptionsDialog : SkinDialog
         _settings.CrawlMaxDepth = _crawlDepth.Value;
         _settings.RespectRobots = _robots.Checked;
         _settings.UserAgent = _userAgent.Value.Trim();
+        _settings.UdpScan = _udp.Checked;
+        _settings.EnableThreatIntel = _intel.Checked;
+        _settings.CheckTakeover = _takeover.Checked;
+        _settings.UseCustomRules = _customRules.Checked;
+        _settings.RulesDirectory = _rulesDir.Value.Trim();
         _settings.ReportAuthorLine = _footer.Value;
         _settings.Save();
         return true;

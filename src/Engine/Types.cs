@@ -34,6 +34,8 @@ internal sealed class OpenService
 {
     public required LiveHost Host { get; init; }
     public required int Port { get; init; }
+    /// <summary>"tcp" or "udp".</summary>
+    public string Proto { get; init; } = "tcp";
     /// <summary>Short service name, e.g. "ssh", "http", "https", "smtp", "mysql", "rdp", "unknown".</summary>
     public string Service { get; set; } = "unknown";
     /// <summary>Product name when identified, e.g. "OpenSSH", "nginx", "Apache httpd", "Microsoft IIS".</summary>

@@ -55,6 +55,7 @@ internal sealed class Session
     private readonly Dictionary<string, HostRecord> _hostsByIp = new();
     private readonly Dictionary<int, TaskItem> _tasksById = new();
     private readonly Dictionary<string, List<PortRecord>> _portsByHost = new();
+    private readonly Dictionary<int, Finding> _findingsById = new();
 
     public string Name { get; set; } = "untitled.tzs";
     public string Target { get; set; } = string.Empty;
@@ -106,6 +107,7 @@ internal sealed class Session
         Samples.Clear();
         SamplesGeneration++;
         _hostsByIp.Clear();
+        _findingsById.Clear();
         _tasksById.Clear();
         _portsByHost.Clear();
         Array.Clear(SeverityCounts);
@@ -164,7 +166,17 @@ internal sealed class Session
                 break;
             case FindingFound f:
                 Findings.Add(f.Finding);
+                _findingsById[f.Finding.Id] = f.Finding;
                 SeverityCounts[(int)f.Finding.Severity]++;
+                break;
+            case FindingEnriched fe:
+                if (_findingsById.TryGetValue(fe.Id, out var enriched))
+                {
+                    if (fe.Cvss is { } score) enriched.Cvss = score;
+                    if (fe.CvssVector != null) enriched.CvssVector = fe.CvssVector;
+                    if (fe.Threat != null) enriched.Threat = fe.Threat;
+                    Findings.Touch();
+                }
                 break;
             case UrlBatch u:
                 Urls.AddRange(u.Urls);
@@ -219,6 +231,8 @@ internal sealed class Session
         {
             Id = f.Id, Severity = f.Severity, Title = f.Title, Host = f.Host, Port = f.Port, Cwe = f.Cwe,
             Description = f.Description, Evidence = f.Evidence, Remediation = f.Remediation, Status = f.Status,
+            RuleId = f.RuleId, Proto = f.Proto, Product = f.Product, Cves = f.Cves.ToList(), Cvss = f.Cvss, CvssVector = f.CvssVector,
+            Threat = f.Threat is { } t ? ThreatDto.From(t) : null,
         }).ToList(),
         Urls = Urls.Items.Select(u => new UrlDto
         {
@@ -293,8 +307,16 @@ internal sealed class Session
                 Evidence = f.Evidence ?? string.Empty,
                 Remediation = f.Remediation ?? string.Empty,
                 Status = f.Status,
+                RuleId = f.RuleId ?? string.Empty,
+                Proto = string.IsNullOrEmpty(f.Proto) ? "tcp" : f.Proto,
+                Product = f.Product ?? string.Empty,
+                Cves = f.Cves?.Where(c => !string.IsNullOrWhiteSpace(c)).ToArray() ?? Array.Empty<string>(),
+                Cvss = f.Cvss is >= 0 and <= 10 ? f.Cvss : null,
+                CvssVector = f.CvssVector ?? string.Empty,
+                Threat = f.Threat?.ToInfo(),
             };
             Findings.Add(finding);
+            _findingsById[finding.Id] = finding;
             SeverityCounts[(int)finding.Severity]++;
         }
         foreach (var u in file.Urls)

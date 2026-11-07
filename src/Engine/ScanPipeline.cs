@@ -21,6 +21,12 @@ internal static class ScanPipeline
             return;
         }
         ctx.Log(LogLevel.Info, "discover", $"{targets.Count} address(es) in scope");
+        foreach (var t in targets)
+        {
+            if (t.Hostname.Length > 0) ctx.NoteHostname(t.Hostname);
+            foreach (var alias in t.Aliases) ctx.NoteHostname(alias.Name);
+        }
+        await DetectionRules.LoadAsync(ctx).ConfigureAwait(false);
         var hosts = await HostDiscovery.RunAsync(ctx, targets).ConfigureAwait(false);
         ctx.SetPhase(ScanContext.PhaseDiscovery, 1);
         ctx.Log(LogLevel.Ok, "discover", $"Discovery finished: {hosts.Count} of {targets.Count} host(s) up");
@@ -61,9 +67,16 @@ internal static class ScanPipeline
                     ctx.Log(level, "portaudit", $"open {port}/tcp on {host.Ip} ({svc.Service}) {svc.DisplayBanner}".TrimEnd());
                     lock (foundLock) found.Add(svc);
                 }).ConfigureAwait(false);
-                found.Sort((a, b) => a.Port.CompareTo(b.Port));
-                lock (servicesLock) services.AddRange(found);
                 ctx.UpdateTask(task, TaskState.Done, 100);
+                if (o.RunUdpScan)
+                {
+                    int udpTask = ctx.AddTask($"UDP probes {host.Ip}", "Port Audit");
+                    ctx.UpdateTask(udpTask, TaskState.Running, 0);
+                    found.AddRange(await UdpScanner.ScanAsync(ctx, host, udpTask).ConfigureAwait(false));
+                    ctx.UpdateTask(udpTask, TaskState.Done, 100);
+                }
+                found.Sort((a, b) => a.Port != b.Port ? a.Port.CompareTo(b.Port) : string.CompareOrdinal(a.Proto, b.Proto));
+                lock (servicesLock) services.AddRange(found);
                 ctx.Emit(new HostStateChanged(host.Ip, "Audited"));
                 ctx.Log(LogLevel.Ok, "portaudit", $"Sweep finished on {host.Ip}: {open.Count} open port(s)");
                 ctx.SetPhase(ScanContext.PhasePorts, Interlocked.Increment(ref hostsDone) / (double)Math.Max(1, hosts.Count));
@@ -87,6 +100,7 @@ internal static class ScanPipeline
                 {
                     var root = await HttpAudit.AuditAsync(ctx, svc).ConfigureAwait(false);
                     if (root != null) lock (rootsLock) webRoots.Add(root);
+                    await DetectionRules.RunHttpRulesAsync(ctx, svc).ConfigureAwait(false);
                     // Other names / start URLs the user gave for this address are separate virtual hosts.
                     foreach (var alias in svc.Host.Aliases)
                     {
@@ -115,7 +129,23 @@ internal static class ScanPipeline
             await Crawler.RunAsync(ctx, webRoots.Distinct().ToList()).ConfigureAwait(false);
         else
             ctx.Log(LogLevel.Info, "crawler", "No web service found; crawl skipped");
+        if (o.CheckTakeover)
+        {
+            int task = ctx.AddTask("Dangling DNS check", "Web Crawler");
+            ctx.UpdateTask(task, TaskState.Running, 0);
+            await TakeoverCheck.RunAsync(ctx, task).ConfigureAwait(false);
+            ctx.UpdateTask(task, TaskState.Done, 100);
+        }
         ctx.SetPhase(ScanContext.PhaseCrawl, 1);
+
+        // Exploitation data is looked up once every check (including crawl-time ones) has reported.
+        if (o.EnableThreatIntel && ctx.FindingsSnapshot().Any(f => f.Cves.Count > 0))
+        {
+            int task = ctx.AddTask("CISA KEV / EPSS enrichment", "Vulnerability Audit");
+            ctx.UpdateTask(task, TaskState.Running, 0);
+            await ThreatIntel.EnrichAsync(ctx).ConfigureAwait(false);
+            ctx.UpdateTask(task, TaskState.Done, 100);
+        }
 
         // ---------------------------------------------------------------- 5. report
         ctx.ResetPhase(ScanContext.PhaseReport);

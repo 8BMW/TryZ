@@ -309,16 +309,21 @@ internal sealed class Navigator : SkinControl
             new Entry(1, "Discovery", IconId.Discovery),
             new Entry(2, "Port Audit", IconId.PortAudit),
             new Entry(3, "Vulnerability Audit", IconId.Vulnerability),
+            new Entry(7, "Remediation Plan", IconId.Remediation),
         }),
         ("Web Application", new[]
         {
             new Entry(4, "Web Crawler", IconId.Crawler),
             new Entry(5, "HTTP Workbench", IconId.Workbench),
         }),
-        ("Output", new[] { new Entry(6, "Reports", IconId.Reports) }),
+        ("Output", new[]
+        {
+            new Entry(6, "Reports", IconId.Reports),
+            new Entry(8, "Scan Compare", IconId.Compare),
+        }),
     };
 
-    private readonly string[] _counts = new string[7];
+    private readonly string[] _counts = new string[9];
     private List<(string Key, string Value)> _summary = new();
     private int _selected;
     private int _hot = -1;

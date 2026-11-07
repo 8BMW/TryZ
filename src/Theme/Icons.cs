@@ -10,6 +10,7 @@ internal enum IconId
     Folder, FolderOpen, Page, Script, Image, Host, Globe, Filter, Exit, Help, About,
     Export, Clear, Copy, Send, Prev, Next, ZoomIn, ZoomOut, Warning, InfoMark, ErrorMark,
     Log, Findings, Queue, Check, Properties, Keyboard,
+    Remediation, Compare,
 }
 
 internal static class Icons
@@ -346,6 +347,19 @@ internal static class Icons
                     for (int col = 0; col < 5; col++)
                         g.FillRectangle(Draw.Brush(Theme.Hex(0x24272B)), 2.2f + col * 2.4f, 5.6f + row * 2.2f, 1.6f, 1.4f);
                 g.FillRectangle(Draw.Brush(Theme.Hex(0x24272B)), 4.4f, 10.2f, 7f, 1.4f);
+                break;
+            case IconId.Remediation:
+                // Ranked bars: what to fix first, then next, then later.
+                Box(g, bloodTop, bloodBot, 1, 2, 14, 3.2f);
+                Box(g, brassTop, brassBot, 1, 6.4f, 10, 3.2f);
+                Box(g, steelTop, steelBot, 1, 10.8f, 6, 3.2f);
+                Poly(g, Theme.Hex(0xF2DFA8), Theme.Hex(0xC8A45C), P(11.2f, 10.2f), P(15, 12.4f), P(11.2f, 14.6f));
+                break;
+            case IconId.Compare:
+                Poly(g, Theme.Hex(0x9A978C), Theme.Hex(0x6E6B62), P(1, 1), P(8, 1), P(8, 11), P(1, 11));
+                Sheet(g, 6f, 8.5f);
+                Line(g, blueTop, 1.4f, 3f, 13.8f, 12.5f, 13.8f);
+                Poly(g, blueTop, blueBot, P(12f, 12f), P(15f, 13.8f), P(12f, 15.6f));
                 break;
         }
     }

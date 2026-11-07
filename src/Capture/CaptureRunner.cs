@@ -33,7 +33,7 @@ internal sealed record CaptureOptions(string Directory, Size LogicalSize, int? D
 internal static class CaptureRunner
 {
     private const uint PW_RENDERFULLCONTENT = 2;
-    private static readonly string[] ModuleFiles = { "1-overview", "2-discovery", "3-port-audit", "4-vulnerability", "5-crawler", "6-workbench", "7-reports" };
+    private static readonly string[] ModuleFiles = { "1-overview", "2-discovery", "3-port-audit", "4-vulnerability", "5-crawler", "6-workbench", "7-reports", "7b-remediation", "7c-compare" };
 
     public static int Run(CaptureOptions options)
     {

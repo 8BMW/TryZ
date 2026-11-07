@@ -28,6 +28,15 @@ internal sealed class ScanOptions
     public bool RunTlsChecks { get; init; } = true;
     public bool EnableNvd { get; init; }
     public string NvdApiKey { get; init; } = string.Empty;
+    /// <summary>Probe common UDP services (DNS, SNMP, NTP, SSDP, ...) after the TCP sweep.</summary>
+    public bool RunUdpScan { get; init; }
+    /// <summary>Annotate CVE findings with CISA KEV and FIRST EPSS data.</summary>
+    public bool EnableThreatIntel { get; init; }
+    /// <summary>Check DNS names seen during the scan for dangling CNAMEs (subdomain takeover).</summary>
+    public bool CheckTakeover { get; init; }
+    /// <summary>Load additional rule files (*.json, *.yaml) from <see cref="RulesDirectory"/>.</summary>
+    public bool UseCustomRules { get; init; }
+    public string RulesDirectory { get; init; } = string.Empty;
     public string UserAgent { get; init; } = "TryZ-Scanner/1.0 (+authorized security assessment)";
 
     public static ScanOptions From(AppSettings s, int profileIndex, int threads)
@@ -35,14 +44,18 @@ internal sealed class ScanOptions
         var custom = (PortSelection)Math.Clamp(s.CustomPortSelection, 0, 2);
         return profileIndex switch
         {
-            0 => Build(s, profileIndex, threads, PortSelection.Top100, crawlPages: Math.Min(200, s.CrawlMaxPages), nvd: false),
-            2 => Build(s, profileIndex, threads, PortSelection.Web, crawlPages: s.CrawlMaxPages, nvd: s.EnableNvd),
-            3 => Build(s, profileIndex, threads, custom, crawlPages: s.CrawlMaxPages, nvd: s.EnableNvd),
-            _ => Build(s, 1, threads, PortSelection.Top1000, crawlPages: s.CrawlMaxPages, nvd: s.EnableNvd),
+            0 => Build(s, profileIndex, threads, PortSelection.Top100, crawlPages: Math.Min(200, s.CrawlMaxPages), nvd: false, udp: s.UdpScan),
+            2 => Build(s, profileIndex, threads, PortSelection.Web, crawlPages: s.CrawlMaxPages, nvd: s.EnableNvd, udp: false),
+            3 => Build(s, profileIndex, threads, custom, crawlPages: s.CrawlMaxPages, nvd: s.EnableNvd, udp: s.UdpScan),
+            _ => Build(s, 1, threads, PortSelection.Top1000, crawlPages: s.CrawlMaxPages, nvd: s.EnableNvd, udp: s.UdpScan),
         };
     }
 
-    private static ScanOptions Build(AppSettings s, int profile, int threads, PortSelection ports, int crawlPages, bool nvd) => new()
+    /// <summary>Folder searched for user rule files when <see cref="AppSettings.RulesDirectory"/> is empty.</summary>
+    public static string DefaultRulesDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TryZ", "rules");
+
+    private static ScanOptions Build(AppSettings s, int profile, int threads, PortSelection ports, int crawlPages, bool nvd, bool udp) => new()
     {
         ProfileIndex = profile,
         Threads = Math.Clamp(threads, 1, 512),
@@ -62,6 +75,11 @@ internal sealed class ScanOptions
         RunTlsChecks = true,
         EnableNvd = nvd,
         NvdApiKey = s.NvdApiKey ?? string.Empty,
+        RunUdpScan = udp,
+        EnableThreatIntel = s.EnableThreatIntel,
+        CheckTakeover = s.CheckTakeover,
+        UseCustomRules = s.UseCustomRules,
+        RulesDirectory = string.IsNullOrWhiteSpace(s.RulesDirectory) ? DefaultRulesDirectory : s.RulesDirectory.Trim(),
         UserAgent = string.IsNullOrWhiteSpace(s.UserAgent) ? "TryZ-Scanner/1.0 (+authorized security assessment)" : s.UserAgent,
     };
 }

@@ -93,7 +93,10 @@ internal sealed class MainForm : FrameForm, IShell
         var crawler = new CrawlerView(this);
         _workbench = new WorkbenchView(this);
         var reports = new ReportsView(this);
-        _modules = new ModuleView[] { overview, discovery, _portAudit, vulnerability, crawler, _workbench, reports };
+        var remediation = new RemediationView(this);
+        var compare = new CompareView(this);
+        // Indexes are persisted (LastModule) and used by Ctrl+1..9, so new modules are appended.
+        _modules = new ModuleView[] { overview, discovery, _portAudit, vulnerability, crawler, _workbench, reports, remediation, compare };
         foreach (var m in _modules)
         {
             m.Visible = false;
@@ -140,8 +143,8 @@ internal sealed class MainForm : FrameForm, IShell
 
         ApplyMenuDpi();
         RestorePlacement();
-        Activate(Math.Clamp(settings.LastModule, 0, 6));
-        _nav.SelectedModule = Math.Clamp(settings.LastModule, 0, 6);
+        Activate(Math.Clamp(settings.LastModule, 0, _modules.Length - 1));
+        _nav.SelectedModule = Math.Clamp(settings.LastModule, 0, _modules.Length - 1);
         _miFollow.Checked = settings.LogAutoscroll;
         UpdateCommandState();
     }
@@ -255,11 +258,19 @@ internal sealed class MainForm : FrameForm, IShell
         var reportsMenu = TopMenu("&Reports");
         MenuItem(reportsMenu, "&View Report", IconId.Report, () => NavigateTo(6), Keys.Control | Keys.R);
         MenuItem(reportsMenu, "&Export HTML Report...", IconId.Export, () => ExportReport(ExportFormat.Html), Keys.Control | Keys.Shift | Keys.E);
+        MenuItem(reportsMenu, "Export &PDF Report...", IconId.Export, () => ExportReport(ExportFormat.Pdf));
+        MenuItem(reportsMenu, "Export &Markdown Report...", IconId.Export, () => ExportReport(ExportFormat.Markdown));
+        reportsMenu.DropDownItems.Add(new ToolStripSeparator());
         MenuItem(reportsMenu, "Export Findings &CSV...", IconId.Export, () => ExportReport(ExportFormat.Csv));
+        MenuItem(reportsMenu, "Export Findings &JSON...", IconId.Export, () => ExportReport(ExportFormat.Json));
+        MenuItem(reportsMenu, "Export &SARIF 2.1.0...", IconId.Export, () => ExportReport(ExportFormat.Sarif));
+        reportsMenu.DropDownItems.Add(new ToolStripSeparator());
+        MenuItem(reportsMenu, "&Remediation Plan", IconId.Remediation, () => NavigateTo(7));
+        MenuItem(reportsMenu, "Compare with &Baseline...", IconId.Compare, () => NavigateTo(8), Keys.Control | Keys.B);
 
         var view = TopMenu("&View");
-        string[] names = { "Overview", "Discovery", "Port Audit", "Vulnerability Audit", "Web Crawler", "HTTP Workbench", "Reports" };
-        IconId[] icons = { IconId.Overview, IconId.Discovery, IconId.PortAudit, IconId.Vulnerability, IconId.Crawler, IconId.Workbench, IconId.Reports };
+        string[] names = { "Overview", "Discovery", "Port Audit", "Vulnerability Audit", "Web Crawler", "HTTP Workbench", "Reports", "Remediation Plan", "Scan Compare" };
+        IconId[] icons = { IconId.Overview, IconId.Discovery, IconId.PortAudit, IconId.Vulnerability, IconId.Crawler, IconId.Workbench, IconId.Reports, IconId.Remediation, IconId.Compare };
         for (int i = 0; i < names.Length; i++)
         {
             int index = i;
@@ -653,34 +664,32 @@ internal sealed class MainForm : FrameForm, IShell
 
     public void ExportReport(ExportFormat format)
     {
-        bool csv = format == ExportFormat.Csv;
+        var info = ReportExporter.Describe(format);
         using var dlg = new SaveFileDialog
         {
-            Title = csv ? "Export Findings" : "Export Report",
-            Filter = csv ? "CSV file (*.csv)|*.csv" : "HTML report (*.html)|*.html;*.htm",
-            DefaultExt = csv ? "csv" : "html",
+            Title = $"Export {info.Name}",
+            Filter = info.Filter,
+            DefaultExt = info.Extension,
             AddExtension = true,
             OverwritePrompt = true,
-            FileName = $"tryz-{(csv ? "findings" : "report")}-{SafeName(_session.Target)}-{DateTime.Now:yyyyMMdd-HHmm}.{(csv ? "csv" : "html")}",
+            FileName = $"tryz-{info.FileTag}-{SafeName(_session.Target)}-{DateTime.Now:yyyyMMdd-HHmm}.{info.Extension}",
         };
         if (dlg.ShowDialog(this) == DialogResult.OK) ExportTo(dlg.FileName, format);
     }
 
     public bool ExportTo(string path, ExportFormat format)
     {
+        var info = ReportExporter.Describe(format);
         try
         {
-            if (format == ExportFormat.Csv)
-                File.WriteAllText(path, ReportWriter.BuildFindingsCsv(_session), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-            else
-                File.WriteAllText(path, ReportWriter.BuildHtml(_session, _settings.ReportAuthorLine), new UTF8Encoding(false));
+            ReportExporter.Write(path, format, _session, _settings);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {
             Notify("Export", $"The file could not be written: {ex.Message}", IconId.Warning);
             return false;
         }
-        _session.AddLog(LogLevel.Ok, "report", $"{(format == ExportFormat.Csv ? "Findings CSV" : "HTML report")} written to {path}");
+        _session.AddLog(LogLevel.Ok, "report", $"{info.Name} written to {path}");
         return true;
     }
 

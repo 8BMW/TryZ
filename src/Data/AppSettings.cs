@@ -39,6 +39,12 @@ internal sealed class AppSettings
     public bool RespectRobots { get; set; } = true;
     public bool EnableNvd { get; set; } = true;
     public string NvdApiKey { get; set; } = string.Empty;
+    public bool UdpScan { get; set; } = true;
+    public bool EnableThreatIntel { get; set; } = true;
+    public bool CheckTakeover { get; set; } = true;
+    public bool UseCustomRules { get; set; } = true;
+    public string RulesDirectory { get; set; } = string.Empty;
+    public string LastCompareBaseline { get; set; } = string.Empty;
     public string UserAgent { get; set; } = "TryZ-Scanner/1.0 (+authorized security assessment)";
 
     private static string FilePath => Path.Combine(
@@ -57,6 +63,8 @@ internal sealed class AppSettings
                 loaded.AuthorizedTargets ??= new();
                 loaded.NvdApiKey ??= string.Empty;
                 loaded.UserAgent ??= string.Empty;
+                loaded.RulesDirectory ??= string.Empty;
+                loaded.LastCompareBaseline ??= string.Empty;
                 return loaded;
             }
         }
