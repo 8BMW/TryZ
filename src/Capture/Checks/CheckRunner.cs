@@ -1,6 +1,8 @@
 #if DEBUG
 using System.Diagnostics;
 using System.Reflection;
+using TryZ.Data;
+using TryZ.Views;
 
 namespace TryZ.Capture.Checks;
 
@@ -44,6 +46,33 @@ internal sealed class CheckContext
         Failed++;
         _lines.Add($"FAIL  {_suite}: suite threw {ex.GetType().Name}: {ex.Message}");
         _lines.Add(ex.StackTrace ?? string.Empty);
+    }
+}
+
+/// <summary>Stand-in for the main window so views can be built and driven without one.</summary>
+internal sealed class CheckShell : IShell
+{
+    public Session Session { get; } = new();
+    public AppSettings Settings { get; } = new();
+    public List<(ExportFormat Format, ReportScope? Scope)> Exports { get; } = new();
+    public List<string> Notices { get; } = new();
+    public List<string> UserLog { get; } = new();
+
+    public void ExportReport(ExportFormat format, ReportScope? scope = null) => Exports.Add((format, scope));
+    public void UseCustomProfile() { }
+    public void Notify(string title, string text, IconId icon = IconId.InfoMark) => Notices.Add($"{title}: {text}");
+    public void NavigateTo(int module) { }
+    public void OpenInWorkbench(string method, string url) { }
+    public void SelectHostInPortAudit(string ip) { }
+    public void LogUser(string source, string text) => UserLog.Add($"{source}: {text}");
+
+    public static IEnumerable<T> Find<T>(Control root) where T : Control
+    {
+        foreach (Control child in root.Controls)
+        {
+            if (child is T result) yield return result;
+            foreach (var descendant in Find<T>(child)) yield return descendant;
+        }
     }
 }
 

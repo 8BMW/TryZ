@@ -6,7 +6,10 @@ namespace TryZ.Data;
 /// <summary>On-disk form of a session (*.tzs, UTF-8 JSON).</summary>
 internal sealed class SessionFile
 {
-    /// <summary>1: original layout. 2: findings carry rule id, protocol, product, CVEs, CVSS and threat data.</summary>
+    /// <summary>
+    /// 1: original layout. 2: findings carry rule id, protocol, product, CVEs, CVSS and threat data.
+    /// Optional lists added later (Assets) stay at format 2 so older builds can still open the file; they just ignore them.
+    /// </summary>
     public const int CurrentFormat = 2;
 
     public int Format { get; set; } = CurrentFormat;
@@ -24,6 +27,8 @@ internal sealed class SessionFile
     public List<FindingDto> Findings { get; set; } = new();
     public List<UrlDto> Urls { get; set; } = new();
     public List<LogDto> Log { get; set; } = new();
+    /// <summary>Host importance set in the remediation plan. Hosts left at Normal are not written.</summary>
+    public List<AssetDto> Assets { get; set; } = new();
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -61,6 +66,7 @@ internal sealed class SessionFile
         file.Findings ??= new();
         file.Urls ??= new();
         file.Log ??= new();
+        file.Assets ??= new();
         file.PhaseProgress ??= new double[5];
         file.Target ??= string.Empty;
         file.Profile ??= string.Empty;
@@ -148,6 +154,12 @@ internal sealed class UrlDto
     public string ContentType { get; set; } = string.Empty;
     public long Size { get; set; }
     public int TimeMs { get; set; }
+}
+
+internal sealed class AssetDto
+{
+    public string Host { get; set; } = string.Empty;
+    public AssetImportance Importance { get; set; } = AssetImportance.Normal;
 }
 
 internal sealed class LogDto

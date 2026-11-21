@@ -662,9 +662,10 @@ internal sealed class MainForm : FrameForm, IShell
         return true;
     }
 
-    public void ExportReport(ExportFormat format)
+    public void ExportReport(ExportFormat format, ReportScope? scope = null)
     {
-        var info = ReportExporter.Describe(format);
+        scope ??= ReportScope.Complete;
+        var info = ReportExporter.Describe(format, scope);
         using var dlg = new SaveFileDialog
         {
             Title = $"Export {info.Name}",
@@ -674,15 +675,16 @@ internal sealed class MainForm : FrameForm, IShell
             OverwritePrompt = true,
             FileName = $"tryz-{info.FileTag}-{SafeName(_session.Target)}-{DateTime.Now:yyyyMMdd-HHmm}.{info.Extension}",
         };
-        if (dlg.ShowDialog(this) == DialogResult.OK) ExportTo(dlg.FileName, format);
+        if (dlg.ShowDialog(this) == DialogResult.OK) ExportTo(dlg.FileName, format, scope);
     }
 
-    public bool ExportTo(string path, ExportFormat format)
+    public bool ExportTo(string path, ExportFormat format, ReportScope? scope = null)
     {
-        var info = ReportExporter.Describe(format);
+        scope ??= ReportScope.Complete;
+        var info = ReportExporter.Describe(format, scope);
         try
         {
-            ReportExporter.Write(path, format, _session, _settings);
+            ReportExporter.Write(path, format, _session, _settings, scope);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
         {

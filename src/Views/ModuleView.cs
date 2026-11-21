@@ -8,7 +8,8 @@ internal interface IShell
 {
     Session Session { get; }
     AppSettings Settings { get; }
-    void ExportReport(ExportFormat format);
+    /// <summary>Asks for a file name and writes the report; <paramref name="scope"/> null means the complete report.</summary>
+    void ExportReport(ExportFormat format, ReportScope? scope = null);
     void UseCustomProfile();
     void Notify(string title, string text, IconId icon = IconId.InfoMark);
     void NavigateTo(int module);

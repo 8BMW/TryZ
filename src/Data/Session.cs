@@ -56,6 +56,8 @@ internal sealed class Session
     private readonly Dictionary<int, TaskItem> _tasksById = new();
     private readonly Dictionary<string, List<PortRecord>> _portsByHost = new();
     private readonly Dictionary<int, Finding> _findingsById = new();
+    // Survives a rescan on purpose: the user told us what the box is worth, a new scan doesn't change that.
+    private readonly Dictionary<string, AssetImportance> _importance = new(StringComparer.OrdinalIgnoreCase);
 
     public string Name { get; set; } = "untitled.tzs";
     public string Target { get; set; } = string.Empty;
@@ -89,10 +91,31 @@ internal sealed class Session
     public IReadOnlyList<PortRecord> PortsFor(string ip) =>
         _portsByHost.TryGetValue(ip, out var list) ? list : Array.Empty<PortRecord>();
 
+    /// <summary>Hosts the user rated as something other than Normal.</summary>
+    public IReadOnlyDictionary<string, AssetImportance> Importance => _importance;
+
+    public AssetImportance ImportanceOf(string host) =>
+        !string.IsNullOrWhiteSpace(host) && _importance.TryGetValue(host.Trim(), out var value) ? value : AssetImportance.Normal;
+
+    public void SetImportance(string host, AssetImportance value)
+    {
+        if (string.IsNullOrWhiteSpace(host)) return;
+        host = host.Trim();
+        if (ImportanceOf(host) == value) return;
+        if (value == AssetImportance.Normal) _importance.Remove(host);
+        else _importance[host] = value;
+        // Ranking depends on it, so views keyed on the finding store pick the change up.
+        Findings.Touch();
+        Dirty = true;
+    }
+
+    public PriorityScore PriorityOf(Finding f) => Prioritizer.Evaluate(f, ImportanceOf(f.Host));
+
     public void Clear()
     {
         Name = "untitled.tzs";
         StartedAt = null;
+        _importance.Clear();
         ResetResults();
     }
 
@@ -240,12 +263,20 @@ internal sealed class Session
             ContentType = u.ContentType, Size = u.Size, TimeMs = u.TimeMs,
         }).ToList(),
         Log = Log.Items.Select(l => new LogDto { Time = l.TimeText, Level = l.Level, Source = l.Source, Text = l.Text }).ToList(),
+        Assets = _importance.OrderBy(a => a.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(a => new AssetDto { Host = a.Key, Importance = a.Value }).ToList(),
     };
 
     /// <summary>Replaces the current results with a saved session.</summary>
     public void LoadFrom(SessionFile file, string name)
     {
         ResetResults();
+        _importance.Clear();
+        foreach (var a in file.Assets)
+        {
+            if (a == null || string.IsNullOrWhiteSpace(a.Host) || !Enum.IsDefined(a.Importance) || a.Importance == AssetImportance.Normal) continue;
+            _importance[a.Host.Trim()] = a.Importance;
+        }
         Name = name;
         Target = file.Target;
         Profile = file.Profile;

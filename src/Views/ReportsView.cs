@@ -13,6 +13,12 @@ internal sealed class ReportOptions
     public bool Evidence { get; set; }
     public bool Hosts { get; set; }
     public string Footer { get; set; } = string.Empty;
+
+    public ReportScope ToScope() => new()
+    {
+        Template = (ReportTemplate)Math.Clamp(Template, 0, ReportScope.TemplateNames.Length - 1),
+        Cover = Cover, Severity = Severity, Findings = Findings, Evidence = Evidence, Hosts = Hosts,
+    };
 }
 
 internal sealed class ReportPreview : SkinControl
@@ -155,23 +161,36 @@ internal sealed class ReportPreview : SkinControl
     {
         var pages = new List<Action<Graphics>>();
         var s = _session;
-        string title = ReportsView.TemplateNames[_options.Template];
-        var findings = s.Findings.Items.OrderByDescending(f => f.Severity).ThenBy(f => Schemas.IpKey(f.Host)).ToList();
+        var scope = _options.ToScope();
+        string title = scope.Name;
+        var findings = scope.SelectFindings(s).OrderByDescending(f => f.Severity).ThenBy(f => Schemas.IpKey(f.Host)).ToList();
         var hosts = s.Hosts.Items.ToList();
+        var plan = scope.IncludesPlan ? RemediationPlan.Build(s, findings) : null;
+        bool planPages = plan != null && scope.Template == ReportTemplate.Remediation;
         int total = 0;
 
         if (_options.Cover || _options.Severity) total++;
         const int perPage = 34;
+        const int planPerPage = 24;
+        int pp = planPages ? Math.Max(1, (int)Math.Ceiling(plan!.Items.Count / (double)planPerPage)) : 0;
         int fp = _options.Findings ? Math.Max(1, (int)Math.Ceiling(findings.Count / (double)(_options.Evidence ? perPage / 2 : perPage))) : 0;
         int hp = _options.Hosts ? Math.Max(1, (int)Math.Ceiling(hosts.Count / 34.0)) : 0;
-        total += fp + hp;
+        total += pp + fp + hp;
         if (total == 0) total = 1;
         int current = 0;
 
-        if (_options.Cover || _options.Severity || (fp == 0 && hp == 0))
+        if (_options.Cover || _options.Severity || (pp == 0 && fp == 0 && hp == 0))
         {
             int n = ++current;
-            pages.Add(g => PaintSummaryPage(g, title, n, total));
+            var top = plan != null && scope.Template == ReportTemplate.Executive ? plan.Items.Take(scope.PlanLimit).ToList() : null;
+            pages.Add(g => PaintSummaryPage(g, title, n, total, top, plan));
+        }
+        for (int i = 0; i < pp; i++)
+        {
+            int n = ++current;
+            var slice = plan!.Items.Skip(i * planPerPage).Take(planPerPage).ToList();
+            int first = i;
+            pages.Add(g => PaintPlanPage(g, title, plan, slice, first == 0, n, total));
         }
         int chunk = _options.Evidence ? perPage / 2 : perPage;
         for (int i = 0; i < fp; i++)
@@ -221,7 +240,7 @@ internal sealed class ReportPreview : SkinControl
         Str(g, $"Page {n} of {total}", small, Muted, 42, 811, 511, StringAlignment.Far);
     }
 
-    private void PaintSummaryPage(Graphics g, string title, int n, int total)
+    private void PaintSummaryPage(Graphics g, string title, int n, int total, List<PlanItem>? top, RemediationPlan? plan)
     {
         var s = _session;
         PageFrame(g, title, n, total);
@@ -298,6 +317,80 @@ internal sealed class ReportPreview : SkinControl
                       ? "Critical and high severity items should be addressed first."
                       : "No critical or high severity items were identified.");
         g.DrawString(text, body, wrap, new RectangleF(42, y, 511, 80));
+
+        if (top == null || plan == null) return;
+        y += 86;
+        Str(g, "Top priorities", h2, Ink, 42, y);
+        y += 20;
+        if (top.Count == 0)
+        {
+            g.DrawString(plan.Summary(), body, wrap, new RectangleF(42, y, 511, 40));
+            return;
+        }
+        foreach (var item in top)
+        {
+            Str(g, item.TierText, bold, TierInk(item.Tier), 42, y, 56);
+            Str(g, item.Title, body, Ink, 102, y, 300);
+            Str(g, item.AffectedText, mono, Muted, 405, y + 1, 90);
+            Str(g, item.DueText, mono, item.Overdue ? Blood : Ink, 497, y + 1, 56, StringAlignment.Far);
+            g.DrawLine(ruleP, 42, y + 13, 553, y + 13);
+            y += 16;
+        }
+        if (plan.Items.Count > top.Count)
+            Str(g, $"{plan.Items.Count - top.Count} more item(s) in the Remediation Plan template.", body, Muted, 42, y + 4, 511);
+    }
+
+    private static Color TierInk(PriorityTier tier) => Theme.Shift(Theme.SeverityColor(tier switch
+    {
+        PriorityTier.FixNow => Severity.Critical,
+        PriorityTier.FixNext => Severity.High,
+        PriorityTier.Planned => Severity.Medium,
+        _ => Severity.Info,
+    }), -46);
+
+    private void PaintPlanPage(Graphics g, string title, RemediationPlan plan, List<PlanItem> items, bool first, int n, int total)
+    {
+        PageFrame(g, title, n, total);
+        using var h2 = new Font("Georgia", 12f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var body = new Font("Tahoma", 8f, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var bold = new Font("Tahoma", 8f, FontStyle.Bold, GraphicsUnit.Pixel);
+        using var mono = new Font("Consolas", 7.5f, FontStyle.Regular, GraphicsUnit.Pixel);
+        using var ruleP = new Pen(RuleC, 0.5f);
+        using var ink = new SolidBrush(Muted);
+        float y = 52;
+        Str(g, first ? "Remediation plan" : "Remediation plan, continued", h2, Ink, 42, y);
+        y += 20;
+        if (first)
+        {
+            g.DrawString(plan.Summary(), body, ink, new RectangleF(42, y, 511, 24));
+            y += 26;
+        }
+        using (var head = new SolidBrush(Theme.Hex(0x34383D))) g.FillRectangle(head, 42, y, 511, 13);
+        float[] xs = { 46, 64, 118, 176, 440 };
+        string[] heads = { "#", "Priority", "Target", "Issue and action", "Affected" };
+        for (int i = 0; i < xs.Length; i++) Str(g, heads[i], bold, Color.White, xs[i], y + 2, 90);
+        y += 15;
+        if (items.Count == 0)
+        {
+            Str(g, "Nothing to plan: no open findings.", body, Muted, 46, y + 2);
+            return;
+        }
+        foreach (var item in items)
+        {
+            Str(g, item.Rank.ToString(), mono, Muted, xs[0], y + 3, 16);
+            Str(g, item.TierText, bold, TierInk(item.Tier), xs[1], y + 2, 52);
+            Str(g, $"{item.Score:0}/100", mono, Muted, xs[1], y + 13, 52);
+            Str(g, item.DueText, mono, item.Overdue ? Blood : Ink, xs[2], y + 3, 56);
+            if (item.Overdue) Str(g, "overdue", bold, Blood, xs[2], y + 13, 56);
+            else if (item.Kev) Str(g, "CISA KEV", bold, Blood, xs[2], y + 13, 56);
+            Str(g, item.Title, bold, Ink, xs[3], y + 2, 260);
+            Str(g, item.Action.Replace('\n', ' '), body, Muted, xs[3], y + 13, 260);
+            Str(g, item.AffectedText, mono, Ink, xs[4], y + 3, 112);
+            if (item.Endpoints.Count > 1) Str(g, string.Join(", ", item.Hosts), mono, Muted, xs[4], y + 13, 112);
+            y += 26;
+            g.DrawLine(ruleP, 42, y, 553, y);
+            y += 1;
+        }
     }
 
     private void PaintFindingsPage(Graphics g, string title, List<Finding> findings, bool first, int n, int total)
@@ -406,10 +499,7 @@ internal sealed class ReportPreview : SkinControl
 
 internal sealed class ReportsView : ModuleView
 {
-    public static readonly string[] TemplateNames =
-    {
-        "Executive Summary", "Technical Findings", "Remediation Plan", "Host Inventory", "Web Application Review",
-    };
+    public static string[] TemplateNames => ReportScope.TemplateNames;
 
     private readonly SkinList _templates = new();
     private readonly EtchedGroup _templateGroup = new("Preview Template");
@@ -435,6 +525,7 @@ internal sealed class ReportsView : ModuleView
     private readonly SplitBox _split;
     private int _lastFindings = -1;
     private int _lastHosts = -1;
+    private int _lastMutation = -1;
 
     public ReportsView(IShell shell) : base(shell)
     {
@@ -461,15 +552,8 @@ internal sealed class ReportsView : ModuleView
             Shell.LogUser("report", $"Report view refreshed: {TemplateNames[_options.Template]}");
             UpdatePageLabel();
         };
-        _export.Click += (_, _) => Shell.ExportReport(_format.SelectedIndex switch
-        {
-            1 => ExportFormat.Csv,
-            2 => ExportFormat.Pdf,
-            3 => ExportFormat.Markdown,
-            4 => ExportFormat.Json,
-            5 => ExportFormat.Sarif,
-            _ => ExportFormat.Html,
-        });
+        // Export what the preview shows: same template, same sections.
+        _export.Click += (_, _) => Shell.ExportReport(SelectedFormat, _options.ToScope());
 
         _leftPanel.Controls.AddRange(new Control[] { _templateGroup, _optionsGroup, _outputGroup, _generate, _export });
         _leftPanel.Layout += (_, _) => LayoutLeft();
@@ -498,6 +582,18 @@ internal sealed class ReportsView : ModuleView
         Controls.Add(_split);
         UpdatePageLabel();
     }
+
+    internal ExportFormat SelectedFormat => _format.SelectedIndex switch
+    {
+        1 => ExportFormat.Csv,
+        2 => ExportFormat.Pdf,
+        3 => ExportFormat.Markdown,
+        4 => ExportFormat.Json,
+        5 => ExportFormat.Sarif,
+        _ => ExportFormat.Html,
+    };
+
+    internal ReportScope Scope => _options.ToScope();
 
     public override string Title => "Reports";
     public override IconId IconKind => IconId.Reports;
@@ -542,12 +638,12 @@ internal sealed class ReportsView : ModuleView
 
     private void ApplyTemplate()
     {
-        int t = Math.Max(0, _templates.SelectedIndex);
-        _cover.Checked = t is 0 or 1 or 4;
-        _severity.Checked = t is 0 or 1;
-        _findings.Checked = t is 1 or 2 or 4;
-        _evidence.Checked = t is 1 or 4;
-        _hosts.Checked = t is 1 or 3;
+        var preset = ReportScope.For((ReportTemplate)Math.Clamp(_templates.SelectedIndex, 0, TemplateNames.Length - 1));
+        _cover.Checked = preset.Cover;
+        _severity.Checked = preset.Severity;
+        _findings.Checked = preset.Findings;
+        _evidence.Checked = preset.Evidence;
+        _hosts.Checked = preset.Hosts;
         OptionsChanged();
     }
 
@@ -572,10 +668,12 @@ internal sealed class ReportsView : ModuleView
     public override void SyncData()
     {
         _options.Footer = Shell.Settings.ReportAuthorLine;
-        if (_lastFindings != Session.FindingCount || _lastHosts != Session.Hosts.Items.Count)
+        // Status and importance edits reorder the plan without changing any count, so watch the mutation version too.
+        if (_lastFindings != Session.FindingCount || _lastHosts != Session.Hosts.Items.Count || _lastMutation != Session.Findings.MutationVersion)
         {
             _lastFindings = Session.FindingCount;
             _lastHosts = Session.Hosts.Items.Count;
+            _lastMutation = Session.Findings.MutationVersion;
             _preview.Rebuild();
             UpdatePageLabel();
         }

@@ -2,6 +2,9 @@ namespace TryZ.Data;
 
 internal enum PriorityTier { FixNow, FixNext, Planned, Monitor }
 
+/// <summary>How much a host matters to the organisation. Set by the user per host; Normal means nothing was said.</summary>
+internal enum AssetImportance { Low, Normal, High, Critical }
+
 /// <summary>Remediation priority of one finding: an explanatory 0..100 heuristic, not a probability or CVSS score.</summary>
 internal readonly record struct PriorityScore(double Score, PriorityTier Tier, IReadOnlyList<string> Reasons)
 {
@@ -16,11 +19,14 @@ internal readonly record struct PriorityScore(double Score, PriorityTier Tier, I
 
 internal static class Prioritizer
 {
+    public static readonly string[] ImportanceNames = { "Low", "Normal", "High", "Critical" };
+
     /// <summary>
-    /// Combines the finding's reported severity with observed threat intelligence. Missing intelligence is unknown,
-    /// not a negative result. The score is an ordering aid; it cannot establish applicability or local risk.
+    /// Combines the finding's reported severity with observed threat intelligence and, when the user has said so,
+    /// how important the host is. Missing intelligence is unknown, not a negative result. The score is an ordering
+    /// aid; it cannot establish applicability or local risk.
     /// </summary>
-    public static PriorityScore Evaluate(Finding f)
+    public static PriorityScore Evaluate(Finding f, AssetImportance importance = AssetImportance.Normal)
     {
         ArgumentNullException.ThrowIfNull(f);
         double score = f.Severity switch
@@ -63,6 +69,26 @@ internal static class Prioritizer
         }
         else if (threat is not null)
             reasons.Add("EPSS unavailable; no reduction was applied.");
+
+        switch (importance)
+        {
+            case AssetImportance.Critical:
+                score += 15;
+                reasons.Add("Host is marked business critical (+15).");
+                break;
+            case AssetImportance.High:
+                score += 8;
+                reasons.Add("Host is marked high importance (+8).");
+                break;
+            case AssetImportance.Low when threat?.Kev == true:
+                // A low-value box with a known-exploited flaw is still a way in; don't let the label bury it.
+                reasons.Add("Host is marked low importance, but known-exploited issues are a common foothold; no reduction applied.");
+                break;
+            case AssetImportance.Low:
+                score -= 10;
+                reasons.Add("Host is marked low importance (-10).");
+                break;
+        }
 
         if (score > 100) reasons.Add("Score capped at 100.");
         score = Math.Clamp(score, 0, 100);
