@@ -29,6 +29,9 @@ internal sealed class SessionFile
     public List<LogDto> Log { get; set; } = new();
     /// <summary>Host importance set in the remediation plan. Hosts left at Normal are not written.</summary>
     public List<AssetDto> Assets { get; set; } = new();
+    /// <summary>Every issue seen across the scans kept in this session, with first/last sighting and resolution.</summary>
+    public List<HistoryDto> History { get; set; } = new();
+    public List<DateTime> Scans { get; set; } = new();
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -67,6 +70,8 @@ internal sealed class SessionFile
         file.Urls ??= new();
         file.Log ??= new();
         file.Assets ??= new();
+        file.History ??= new();
+        file.Scans ??= new();
         file.PhaseProgress ??= new double[5];
         file.Target ??= string.Empty;
         file.Profile ??= string.Empty;
@@ -156,6 +161,22 @@ internal sealed class UrlDto
     public string ContentType { get; set; } = string.Empty;
     public long Size { get; set; }
     public int TimeMs { get; set; }
+}
+
+internal sealed class HistoryDto
+{
+    public string Key { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string Host { get; set; } = string.Empty;
+    public string Proto { get; set; } = "tcp";
+    public int Port { get; set; }
+    public Severity Severity { get; set; }
+    public DateTime FirstSeen { get; set; }
+    public DateTime LastSeen { get; set; }
+    public DateTime? ResolvedAt { get; set; }
+    public int TimesSeen { get; set; }
+    public int Reopened { get; set; }
+    public FindingStatus Status { get; set; }
 }
 
 internal sealed class AssetDto

@@ -140,7 +140,7 @@ internal static class StructuredReport
         foreach (var i in plan.Items.Take(scope.PlanLimit))
         {
             string due = i.Overdue ? $"**{i.DueText} overdue**" : i.DueText;
-            string kev = (i.Kev ? (i.Ransomware ? " (known exploited, ransomware)" : " (known exploited)") : string.Empty) + (i.NeedsVerification ? " (verify first)" : string.Empty);
+            string kev = (i.Kev ? (i.Ransomware ? " (known exploited, ransomware)" : " (known exploited)") : string.Empty) + (i.NeedsVerification ? " (verify first)" : string.Empty) + (i.Reopened ? " (reopened)" : string.Empty);
             sb.Append("| ").Append(i.Rank).Append(" | ").Append(Md(i.TierText)).Append(' ').Append(i.Score.ToString("0", CultureInfo.InvariantCulture)).Append("/100 | ")
               .Append(due).Append(" | ").Append(Cell($"[{i.Severity}] {i.Title}{kev}")).Append(" | ").Append(Cell(i.AffectedText)).AppendLine(" |");
         }

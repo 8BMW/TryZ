@@ -31,6 +31,10 @@ internal sealed class PlanItem
     public int Confirmed { get; init; }
     /// <summary>Every finding behind the item is tentative and unconfirmed: check before anyone schedules downtime.</summary>
     public bool NeedsVerification { get; init; }
+    /// <summary>Earliest sighting of any finding in the item, from the session history.</summary>
+    public DateOnly? FirstSeen { get; init; }
+    /// <summary>It had been fixed in an earlier scan and is back.</summary>
+    public bool Reopened { get; init; }
 
     public string TierText => RemediationPlan.TierName(Tier);
     public string DueText => Due is DateOnly d ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "-";
@@ -43,8 +47,9 @@ internal sealed class PlanItem
 /// </summary>
 internal sealed class RemediationPlan
 {
-    private RemediationPlan(IReadOnlyList<PlanItem> items, DateOnly baseDate, DateOnly today, int open, int closed)
+    private RemediationPlan(IReadOnlyList<PlanItem> items, DateOnly baseDate, DateOnly today, int open, int closed, HistoryStats history)
     {
+        History = history;
         Items = items;
         BaseDate = baseDate;
         Today = today;
@@ -55,6 +60,7 @@ internal sealed class RemediationPlan
     public IReadOnlyList<PlanItem> Items { get; }
     /// <summary>Day the clock starts: the scan start, or today when no scan has run.</summary>
     public DateOnly BaseDate { get; }
+    public HistoryStats History { get; }
     public DateOnly Today { get; }
     public int OpenFindings { get; }
     /// <summary>Findings left out because they were accepted or marked false positive.</summary>
@@ -112,7 +118,7 @@ internal sealed class RemediationPlan
         var groups = open
             .Select(f => (Finding: f, Priority: session.PriorityOf(f)))
             .GroupBy(x => GroupKey(x.Finding), StringComparer.Ordinal)
-            .Select(g => Item(g.ToList(), baseDate, now))
+            .Select(g => Item(g.ToList(), session, baseDate, now))
             .OrderBy(i => i.Tier)
             .ThenByDescending(i => i.Score)
             .ThenBy(i => i.Due ?? DateOnly.MaxValue)
@@ -130,9 +136,24 @@ internal sealed class RemediationPlan
                 Rank = i + 1, Title = g.Title, Action = g.Action, Tier = g.Tier, Score = g.Score, Severity = g.Severity,
                 Findings = g.Findings, Endpoints = g.Endpoints, Hosts = g.Hosts, Cves = g.Cves, Due = g.Due, DueBasis = g.DueBasis,
                 Overdue = g.Overdue, Kev = g.Kev, Ransomware = g.Ransomware, Epss = g.Epss, Confirmed = g.Confirmed, NeedsVerification = g.NeedsVerification,
+                FirstSeen = g.FirstSeen, Reopened = g.Reopened,
             });
         }
-        return new RemediationPlan(ranked, baseDate, now, open.Count, all.Count - open.Count);
+        return new RemediationPlan(ranked, baseDate, now, open.Count, all.Count - open.Count, session.History.Stats(now.ToDateTime(TimeOnly.MaxValue)));
+    }
+
+    /// <summary>
+    /// The clock for a finding starts when it was first seen, not at the latest scan: rescanning every month must not
+    /// keep pushing a three-month-old issue's deadline out.
+    /// </summary>
+    public static DateOnly StartFor(Session session, Finding f, DateOnly fallback)
+    {
+        if (session.History.Get(f) is { } e)
+        {
+            var first = DateOnly.FromDateTime(e.FirstSeen);
+            if (first < fallback) return first;
+        }
+        return fallback;
     }
 
     // Same check plus the same advice means the same fix. The advice is part of the key because a rule that
@@ -145,14 +166,14 @@ internal sealed class RemediationPlan
 
     private static string Normalize(string text) => string.Join(' ', (text ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
 
-    private static PlanItem Item(List<(Finding Finding, PriorityScore Priority)> group, DateOnly baseDate, DateOnly today)
+    private static PlanItem Item(List<(Finding Finding, PriorityScore Priority)> group, Session session, DateOnly baseDate, DateOnly today)
     {
         var lead = group.OrderByDescending(x => x.Priority.Score).ThenByDescending(x => x.Finding.Severity).ThenBy(x => x.Finding.Id).First();
         DateOnly? due = null;
         string basis = "No deadline; review at the next assessment";
         foreach (var (f, p) in group)
         {
-            var (d, why) = DueFor(f, p, baseDate);
+            var (d, why) = DueFor(f, p, StartFor(session, f, baseDate));
             if (d is DateOnly day && (due is null || day < due)) { due = day; basis = why; }
         }
         var findings = group.Select(x => x.Finding)
@@ -182,6 +203,8 @@ internal sealed class RemediationPlan
             Epss = threats.Select(t => t.Epss).Where(e => e is double v && double.IsFinite(v)).Max(),
             Confirmed = findings.Count(f => f.Status == FindingStatus.Confirmed),
             NeedsVerification = findings.All(f => f.NeedsVerification),
+            FirstSeen = findings.Select(f => session.History.Get(f)?.FirstSeen).Where(d => d != null).Select(d => DateOnly.FromDateTime(d!.Value)).DefaultIfEmpty().Min() is DateOnly first && first != default ? first : null,
+            Reopened = findings.Any(f => session.History.Get(f)?.Reopened > 0),
         };
     }
 
@@ -191,27 +214,31 @@ internal sealed class RemediationPlan
     /// <summary>One-line summary used at the top of every plan export.</summary>
     public string Summary()
     {
+        string trend = History.Scans >= 2 ? $" Across {History.Scans} scans: {History.Text()}." : string.Empty;
         if (Items.Count == 0)
-            return OpenFindings == 0 && ClosedFindings == 0
+            return (OpenFindings == 0 && ClosedFindings == 0
                 ? "No findings recorded, so there is nothing to plan."
-                : $"No open work: all {ClosedFindings} finding(s) are accepted or marked false positive.";
+                : $"No open work: all {ClosedFindings} finding(s) are accepted or marked false positive.") + trend;
         var sb = new StringBuilder();
         sb.Append(CultureInfo.InvariantCulture, $"{OpenFindings} open finding(s) grouped into {Items.Count} work item(s): ");
         sb.Append(CultureInfo.InvariantCulture, $"{Count(PriorityTier.FixNow)} fix now, {Count(PriorityTier.FixNext)} fix next, ");
         sb.Append(CultureInfo.InvariantCulture, $"{Count(PriorityTier.Planned)} planned, {Count(PriorityTier.Monitor)} monitor.");
         if (OverdueCount > 0) sb.Append(CultureInfo.InvariantCulture, $" {OverdueCount} item(s) are past their target date.");
         if (ClosedFindings > 0) sb.Append(CultureInfo.InvariantCulture, $" {ClosedFindings} accepted / false-positive finding(s) are left out.");
+        int reopened = Items.Count(i => i.Reopened);
+        if (reopened > 0) sb.Append(CultureInfo.InvariantCulture, $" {reopened} item(s) were fixed before and came back.");
+        sb.Append(trend);
         return sb.ToString();
     }
 
     public const string Disclaimer =
         "Priority is an ordering aid built from severity, detection confidence, CISA KEV, FIRST EPSS and the host importance set in TryZ. "
-        + "Target dates start from the scan date; adjust them to your own policy. Verify each issue applies before changing production systems.";
+        + "Target dates start from the scan in which an issue was first seen; adjust them to your own policy. Verify each issue applies before changing production systems.";
 
     public string Csv()
     {
         var sb = new StringBuilder();
-        sb.Append("Rank,Priority,Score,Severity,Due,Due basis,Overdue,Verify first,Issue,Action,Affected,Endpoints,CVEs,KEV,EPSS,Finding ids\r\n");
+        sb.Append("Rank,Priority,Score,Severity,Due,Due basis,Overdue,Verify first,First seen,Reopened,Issue,Action,Affected,Endpoints,CVEs,KEV,EPSS,Finding ids\r\n");
         foreach (var i in Items)
         {
             sb.Append(i.Rank).Append(',')
@@ -222,6 +249,8 @@ internal sealed class RemediationPlan
               .Append(ReportWriter.Csv(i.DueBasis)).Append(',')
               .Append(i.Overdue ? "yes" : "no").Append(',')
               .Append(i.NeedsVerification ? "yes" : "no").Append(',')
+              .Append(i.FirstSeen is DateOnly fs ? fs.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : string.Empty).Append(',')
+              .Append(i.Reopened ? "yes" : "no").Append(',')
               .Append(ReportWriter.Csv(i.Title)).Append(',')
               .Append(ReportWriter.Csv(i.Action)).Append(',')
               .Append(i.Endpoints.Count).Append(',')
@@ -241,11 +270,17 @@ internal sealed class RemediationPlan
         openFindings = OpenFindings,
         closedFindings = ClosedFindings,
         summary = Summary(),
+        history = new
+        {
+            scans = History.Scans, open = History.Open, resolved = History.Resolved, reopened = History.Reopened,
+            meanDaysToResolve = History.MeanDaysToResolve is double m ? Math.Round(m, 1) : (double?)null, oldestOpenDays = History.OldestOpenDays,
+        },
         items = Items.Select(i => new
         {
             rank = i.Rank, priority = i.TierText, score = Math.Round(i.Score), severity = i.Severity.ToString(), title = i.Title,
             action = i.Action, due = i.Due?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), dueBasis = i.DueBasis, overdue = i.Overdue,
-            endpoints = i.Endpoints, cves = i.Cves, kev = i.Kev, verifyFirst = i.NeedsVerification, ransomware = i.Ransomware, epss = i.Epss, confirmed = i.Confirmed,
+            endpoints = i.Endpoints, cves = i.Cves, kev = i.Kev, verifyFirst = i.NeedsVerification,
+            firstSeen = i.FirstSeen?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), reopened = i.Reopened, ransomware = i.Ransomware, epss = i.Epss, confirmed = i.Confirmed,
             findingIds = i.Findings.Select(f => f.Id).ToArray(),
         }).ToArray(),
     };

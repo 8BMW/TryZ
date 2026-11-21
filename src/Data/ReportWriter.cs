@@ -210,6 +210,8 @@ internal static class ReportWriter
             sb.Append("<td>").Append(Badge(i.Severity)).Append(' ').Append(H(i.Title));
             if (i.Kev) sb.Append(" <strong>&middot; known exploited").Append(i.Ransomware ? ", ransomware" : string.Empty).Append("</strong>");
             if (i.NeedsVerification) sb.Append(" <em>&middot; verify first</em>");
+            if (i.Reopened) sb.Append(" <strong class=\"late\">&middot; reopened</strong>");
+            if (i.FirstSeen is DateOnly first && first < plan.BaseDate) sb.Append("<div class=\"act\">First seen ").Append(first.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)).Append("</div>");
             sb.Append("<div class=\"act\">").Append(H(i.Action)).Append("</div>");
             if (i.Cves.Count > 0) sb.Append("<div class=\"act\">").Append(H(string.Join(", ", i.Cves.Take(8)) + (i.Cves.Count > 8 ? $" +{i.Cves.Count - 8}" : string.Empty))).Append("</div>");
             sb.Append("</td><td class=\"mono\">").Append(string.Join("<br>", i.Endpoints.Take(6).Select(H)));

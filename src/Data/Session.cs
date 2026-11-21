@@ -67,6 +67,8 @@ internal sealed class Session
     public string FilterText { get; set; } = string.Empty;
 
     public RowStore<HostRecord> Hosts { get; } = new();
+    /// <summary>Survives rescans and is saved with the session; see <see cref="FindingHistory"/>.</summary>
+    public FindingHistory History { get; } = new();
     public RowStore<PortRecord> Ports { get; } = new();
     public RowStore<Finding> Findings { get; } = new();
     public RowStore<UrlRecord> Urls { get; } = new();
@@ -116,11 +118,15 @@ internal sealed class Session
         Name = "untitled.tzs";
         StartedAt = null;
         _importance.Clear();
+        Findings.Clear(); // so ResetResults has nothing to carry into the cleared history
+        History.Clear();
         ResetResults();
     }
 
     public void ResetResults()
     {
+        // The results about to go are a scan in their own right: remember them, and the triage done on them.
+        if (Findings.Items.Count > 0) History.Absorb(Findings.Items, StartedAt ?? DateTime.Now);
         Hosts.Clear();
         Ports.Clear();
         Findings.Clear();
@@ -188,6 +194,9 @@ internal sealed class Session
                 }
                 break;
             case FindingFound f:
+                // Same issue as last time: keep the analyst's verdict instead of asking them to triage it again.
+                if (f.Finding.Status == FindingStatus.New && History.Get(f.Finding) is { Status: not FindingStatus.New } known)
+                    f.Finding.Status = known.Status;
                 Findings.Add(f.Finding);
                 _findingsById[f.Finding.Id] = f.Finding;
                 SeverityCounts[(int)f.Finding.Severity]++;
@@ -264,14 +273,54 @@ internal sealed class Session
             ContentType = u.ContentType, Size = u.Size, TimeMs = u.TimeMs,
         }).ToList(),
         Log = Log.Items.Select(l => new LogDto { Time = l.TimeText, Level = l.Level, Source = l.Source, Text = l.Text }).ToList(),
+        History = SnapshotHistory(),
+        Scans = History.ScanTimes,
         Assets = _importance.OrderBy(a => a.Key, StringComparer.OrdinalIgnoreCase)
             .Select(a => new AssetDto { Host = a.Key, Importance = a.Value }).ToList(),
     };
 
+    private List<HistoryDto> SnapshotHistory()
+    {
+        History.SyncStatus(Findings.Items);
+        return History.ToDto();
+    }
+
+    /// <summary>
+    /// Folds the current results into the history at the end of a scan. Resolution is only claimed when
+    /// <paramref name="completed"/> is true; a stopped or failed scan just records what it saw.
+    /// </summary>
+    public ScanDelta RecordScan(bool completed)
+    {
+        var delta = History.Record(Findings.Items, Ports.Items, Hosts.Items, StartedAt ?? DateTime.Now, completed);
+        Findings.Touch();
+        Dirty = true;
+        return delta;
+    }
+
+    /// <summary>Adds another session's history (and its findings, as one past scan) to this one.</summary>
+    public void ImportHistory(SessionFile file)
+    {
+        History.Merge(file.History, file.Scans);
+        if (file.History.Count == 0 && file.Findings.Count > 0)
+        {
+            var temp = new Session();
+            temp.LoadFrom(file, "import");
+            History.Absorb(temp.Findings.Items, file.StartedAt ?? file.SavedAt);
+        }
+        // Statuses from the import apply to what is on screen now.
+        foreach (var f in Findings.Items)
+            if (f.Status == FindingStatus.New && History.Get(f) is { Status: not FindingStatus.New } known) f.Status = known.Status;
+        Findings.Touch();
+        Dirty = true;
+    }
+
     /// <summary>Replaces the current results with a saved session.</summary>
     public void LoadFrom(SessionFile file, string name)
     {
+        Findings.Clear(); // a load replaces the session; nothing here belongs in its history
         ResetResults();
+        History.Clear();
+        History.Merge(file.History, file.Scans);
         _importance.Clear();
         foreach (var a in file.Assets)
         {
@@ -376,6 +425,9 @@ internal sealed class Session
                 Text = l.Text ?? string.Empty,
             });
         }
+        // Files from before history existed: their findings are at least known from that scan on.
+        if (file.History.Count == 0 && Findings.Items.Count > 0)
+            History.Absorb(Findings.Items, file.StartedAt ?? (file.SavedAt == default ? DateTime.Now : file.SavedAt));
         Dirty = true;
     }
 

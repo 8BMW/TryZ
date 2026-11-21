@@ -87,7 +87,7 @@ internal sealed class RemediationView : ModuleView
     private DateOnly BaseDate => _plan?.BaseDate ?? DateOnly.FromDateTime(DateTime.Now);
 
     private DateOnly Due(Finding f) =>
-        RemediationPlan.IsClosed(f) ? DateOnly.MaxValue : RemediationPlan.DueFor(f, Session.PriorityOf(f), BaseDate).Due ?? DateOnly.MaxValue;
+        RemediationPlan.IsClosed(f) ? DateOnly.MaxValue : RemediationPlan.DueFor(f, Session.PriorityOf(f), RemediationPlan.StartFor(Session, f, BaseDate)).Due ?? DateOnly.MaxValue;
 
     private string DueText(Finding f)
     {
@@ -110,9 +110,13 @@ internal sealed class RemediationView : ModuleView
             foreach (var f in item.Findings) _itemOf[f] = item;
     }
 
-    private void UpdateCaption() => _count.Caption = _plan is { Items.Count: > 0 } plan
-        ? $"{_rows.Count} shown / {Session.Findings.Items.Count} findings  |  {plan.Items.Count} work item(s)"
-        : $"{_rows.Count} shown / {Session.Findings.Items.Count} findings";
+    private void UpdateCaption()
+    {
+        string text = $"{_rows.Count} shown / {Session.Findings.Items.Count} findings";
+        if (_plan is { Items.Count: > 0 } plan) text += $"  |  {plan.Items.Count} work item(s)";
+        if (_plan is { History.Scans: >= 2 } p) text += $"  |  {p.History.Text()}";
+        _count.Caption = text;
+    }
 
     private void ImportanceChosen()
     {
@@ -150,10 +154,16 @@ internal sealed class RemediationView : ModuleView
             blocks.Add(($"Marked {f.StatusText.ToLowerInvariant()}, so it is left out of the plan and exports.", false, false));
         else
         {
-            var (due, basis) = RemediationPlan.DueFor(f, priority, BaseDate);
+            var (due, basis) = RemediationPlan.DueFor(f, priority, RemediationPlan.StartFor(Session, f, BaseDate));
             blocks.Add(("Target date", true, false));
             string when = due is DateOnly d ? d.ToString("yyyy-MM-dd") + (d < DateOnly.FromDateTime(DateTime.Now) ? "  (overdue)" : string.Empty) : "None";
             blocks.Add(($"{when}  |  {basis}", false, true));
+            if (Session.History.Get(f) is { } seen)
+            {
+                string story = $"First seen {seen.FirstSeen:yyyy-MM-dd}, seen in {seen.TimesSeen} scan(s)";
+                if (seen.Reopened > 0) story += $", came back {seen.Reopened} time(s) after being fixed";
+                blocks.Add((story + ".", false, true));
+            }
             if (_itemOf.TryGetValue(f, out var item) && item.Endpoints.Count > 1)
             {
                 blocks.Add(($"Same fix, work item #{item.Rank}", true, false));

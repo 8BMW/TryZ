@@ -224,6 +224,7 @@ internal sealed class MainForm : FrameForm, IShell
 
         var session = TopMenu("&Session");
         MenuItem(session, "Session &Properties...", IconId.Properties, ShowSessionProperties);
+        MenuItem(session, "&Import Finding History...", IconId.Open, ImportHistory);
         session.DropDownItems.Add(new ToolStripSeparator());
         MenuItem(session, "Clear Activity &Log", IconId.Clear, () =>
         {
@@ -662,6 +663,24 @@ internal sealed class MainForm : FrameForm, IShell
         return true;
     }
 
+    private void ImportHistory()
+    {
+        using var dlg = new OpenFileDialog { Title = "Import finding history from a session", Filter = "TryZ session (*.tzs)|*.tzs|All files (*.*)|*.*", CheckFileExists = true };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var file = SessionFile.Read(dlg.FileName);
+            int before = _session.History.Entries.Count;
+            _session.ImportHistory(file);
+            _session.AddLog(LogLevel.Ok, "history", $"Imported history from {Path.GetFileName(dlg.FileName)}: {_session.History.Entries.Count - before} new issue(s), {_session.History.ScanCount} scan(s) known");
+            SyncUi(force: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or NotSupportedException)
+        {
+            Notify("History", $"The session could not be read: {ex.Message}", IconId.Warning);
+        }
+    }
+
     public void ExportReport(ExportFormat format, ReportScope? scope = null)
     {
         scope ??= ReportScope.Complete;
@@ -717,6 +736,7 @@ internal sealed class MainForm : FrameForm, IShell
                     if (ev is ScanCompleted)
                     {
                         _engine.MarkCompleted();
+                        LogScanDelta(_session.RecordScan(completed: true));
                         // Tasks still open at this point belong to a phase the engine abandoned (for example after an internal error).
                         _session.CancelOpenTasks();
                         continue;
@@ -724,6 +744,7 @@ internal sealed class MainForm : FrameForm, IShell
                     if (ev is ScanFailed)
                     {
                         _engine.MarkFailed();
+                        _session.RecordScan(completed: false);
                         _session.CancelOpenTasks();
                         _session.Dirty = true;
                         continue;
@@ -739,12 +760,21 @@ internal sealed class MainForm : FrameForm, IShell
         }
     }
 
+    private void LogScanDelta(ScanDelta d)
+    {
+        if (_session.History.ScanCount < 2) return;
+        _session.AddLog(LogLevel.Notice, "history",
+            $"Compared with earlier scans: {d.New} new, {d.Recurring} still present, {d.Reopened} reopened, {d.Resolved} resolved, {d.NotObserved} not re-checked (left open).");
+    }
+
     private void StopScan()
     {
         if (_engine.State is not (ScanState.Running or ScanState.Paused)) return;
         _engine.Stop();
         _consumer?.Cancel();
         _session.CancelOpenTasks();
+        // A stopped scan saw less than it would have: record what it saw, resolve nothing.
+        _session.RecordScan(completed: false);
         _session.AddLog(LogLevel.Warn, "engine", "Scan stopped by user");
     }
 
