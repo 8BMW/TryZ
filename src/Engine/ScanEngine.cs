@@ -53,6 +53,12 @@ internal sealed class ScanEngine : IDisposable
         SetState(ScanState.Completed);
     }
 
+    public void MarkFailed()
+    {
+        Cancel();
+        SetState(ScanState.Failed);
+    }
+
     public void Reset()
     {
         Cancel();
@@ -94,8 +100,8 @@ internal sealed class ScanEngine : IDisposable
         catch (Exception ex)
         {
             ctx.Log(LogLevel.Alert, "engine", $"Scan aborted by an internal error: {ex.GetType().Name}: {ex.Message}");
-            writer.TryWrite(ctx.SampleMetrics(0.25, completed: true));
-            writer.TryWrite(new ScanCompleted());
+            writer.TryWrite(ctx.SampleMetrics(0.25, completed: false));
+            writer.TryWrite(new ScanFailed());
         }
         finally
         {

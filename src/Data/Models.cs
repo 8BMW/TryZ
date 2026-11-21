@@ -3,7 +3,7 @@ namespace TryZ.Data;
 internal enum LogLevel { Debug, Info, Notice, Ok, Warn, Alert }
 internal enum FindingStatus { New, Confirmed, FalsePositive, Accepted }
 internal enum TaskState { Queued, Running, Done, Cancelled }
-internal enum ScanState { Idle, Running, Paused, Stopped, Completed }
+internal enum ScanState { Idle, Running, Paused, Stopped, Completed, Failed }
 
 internal sealed class HostRecord
 {

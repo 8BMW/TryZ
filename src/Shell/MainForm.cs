@@ -719,6 +719,13 @@ internal sealed class MainForm : FrameForm, IShell
                         _session.CancelOpenTasks();
                         continue;
                     }
+                    if (ev is ScanFailed)
+                    {
+                        _engine.MarkFailed();
+                        _session.CancelOpenTasks();
+                        _session.Dirty = true;
+                        continue;
+                    }
                     if (ev is ScanLog { Level: LogLevel.Debug } && !_settings.LogDebug) continue;
                     _session.Apply(ev);
                 }
@@ -794,6 +801,7 @@ internal sealed class MainForm : FrameForm, IShell
             ScanState.Running => $"Running: {s.PhaseText}",
             ScanState.Paused => $"Paused: {s.PhaseText}",
             ScanState.Stopped => "Stopped",
+            ScanState.Failed => "Failed — see activity log",
             ScanState.Completed => "Completed",
             _ => "Ready",
         };

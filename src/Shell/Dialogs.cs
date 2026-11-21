@@ -609,7 +609,7 @@ internal sealed class OptionsDialog : SkinDialog
     {
         var g = new EtchedGroup("UDP Service Probes");
         _udp = g.Add(null, new SkinCheck("Probe common UDP services after the TCP sweep", _settings.UdpScan), height: 17);
-        g.Add(null, Note("Sends a protocol-correct request to each port (DNS, SNMP, NTP, SSDP, NetBIOS, IKE, ...), so a reply proves the service is there. Ports that stay silent are reported as open|filtered only in the log. Not used by the Web Only profile."), height: 58);
+        g.Add(null, Note("Sends a protocol-correct request to each port (DNS, SNMP, NTP, SSDP and NetBIOS), so a reply proves the service is there. Ports that stay silent are reported as open|filtered only in the log. Not used by the Web Only profile."), height: 58);
         return Stack(g);
     }
 
@@ -617,7 +617,7 @@ internal sealed class OptionsDialog : SkinDialog
     {
         var g = new EtchedGroup("Exploitation Data");
         _intel = g.Add(null, new SkinCheck("Annotate CVE findings with CISA KEV and FIRST EPSS data", _settings.EnableThreatIntel), height: 17);
-        g.Add(null, Note("The KEV catalog is downloaded from cisa.gov and cached for 24 hours. EPSS scores are requested from api.first.org with the CVE identifiers only; no host data leaves this machine."), height: 44);
+        g.Add(null, Note("KEV is cached in memory for 24 hours and cleared on exit. EPSS requests send only CVE IDs to api.first.org; no host data is sent."), height: 44);
         return Stack(g);
     }
 

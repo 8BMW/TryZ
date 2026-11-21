@@ -412,8 +412,8 @@ internal sealed class ReportsView : ModuleView
     };
 
     private readonly SkinList _templates = new();
-    private readonly EtchedGroup _templateGroup = new("Template");
-    private readonly EtchedGroup _optionsGroup = new("Sections");
+    private readonly EtchedGroup _templateGroup = new("Preview Template");
+    private readonly EtchedGroup _optionsGroup = new("Preview Sections");
     private readonly EtchedGroup _outputGroup = new("Output") { LabelWidth = 50 };
     private readonly SkinCheck _cover = new("Cover details", true);
     private readonly SkinCheck _severity = new("Severity chart", true);
@@ -451,7 +451,7 @@ internal sealed class ReportsView : ModuleView
         foreach (var c in new[] { _cover, _severity, _findings, _evidence, _hosts })
             c.CheckedChanged += (_, _) => OptionsChanged();
 
-        _format.AddRange("HTML report", "CSV findings");
+        _format.AddRange("HTML report", "CSV findings", "PDF report", "Markdown report", "JSON findings", "SARIF 2.1.0");
         _format.SelectedIndex = 0;
         _outputGroup.Add("Format", _format);
 
@@ -461,7 +461,15 @@ internal sealed class ReportsView : ModuleView
             Shell.LogUser("report", $"Report view refreshed: {TemplateNames[_options.Template]}");
             UpdatePageLabel();
         };
-        _export.Click += (_, _) => Shell.ExportReport(_format.SelectedIndex == 1 ? ExportFormat.Csv : ExportFormat.Html);
+        _export.Click += (_, _) => Shell.ExportReport(_format.SelectedIndex switch
+        {
+            1 => ExportFormat.Csv,
+            2 => ExportFormat.Pdf,
+            3 => ExportFormat.Markdown,
+            4 => ExportFormat.Json,
+            5 => ExportFormat.Sarif,
+            _ => ExportFormat.Html,
+        });
 
         _leftPanel.Controls.AddRange(new Control[] { _templateGroup, _optionsGroup, _outputGroup, _generate, _export });
         _leftPanel.Layout += (_, _) => LayoutLeft();

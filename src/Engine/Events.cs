@@ -16,5 +16,6 @@ internal sealed record TaskChanged(int Id, TaskState State, int Progress) : Scan
 internal sealed record ScanMetrics(double Elapsed, double RequestsPerSecond, double LatencyMs, int ActiveThreads,
     double Progress, string PhaseText, long TotalRequests, double[] PhaseProgress) : ScanEvent;
 internal sealed record ScanCompleted : ScanEvent;
+internal sealed record ScanFailed : ScanEvent;
 
 internal sealed record ScanRequest(string Target, int ProfileIndex, int Threads, ScanOptions Options);

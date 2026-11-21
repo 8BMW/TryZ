@@ -86,9 +86,9 @@ internal static class VulnRules
             }
         }
 
-        private void Add(Severity sev, string title, int cwe, string description, string evidence, string remediation)
+        private void Add(Severity sev, string title, int cwe, string description, string evidence, string remediation, FindingDetails? details = null)
         {
-            _ctx.AddFinding(sev, title, _svc.Host.Ip, _svc.Port, cwe, description, evidence, remediation);
+            _ctx.AddFinding(sev, title, _svc.Host.Ip, _svc.Port, cwe, description, evidence, remediation, details);
             if (sev > Risk) Risk = sev;
         }
 
@@ -243,9 +243,12 @@ internal static class VulnRules
         private void Cve(Severity sev, string title, int cwe, string product, string version, string description, string remediation, string? extra = null)
         {
             string evidence = $"{Observed}. Version banner indicates {product} {version}." + (extra != null ? " " + extra : string.Empty);
+            // Only attach identifiers explicitly named in this rule's title; mentions in explanatory text may be examples.
+            var ids = Regex.Matches(title, @"\bCVE-\d{4}-\d{4,}\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+                .Select(m => m.Value.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             Add(sev, title, cwe,
                 $"Version banner indicates {product} {version}, which is in the affected range. {description}{_distroNote}{BannerCaveat}",
-                evidence, remediation);
+                evidence, remediation, new FindingDetails { Product = $"{product} {version}", Proto = _svc.Proto, Cves = ids });
         }
 
         /// <summary>Version reported by ServiceProbe when its product name contains <paramref name="word"/>.</summary>

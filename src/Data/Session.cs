@@ -50,7 +50,7 @@ internal readonly record struct ThroughputSample(double RequestsPerSecond, doubl
 
 internal sealed class Session
 {
-    public static readonly string[] PhaseNames = { "Host discovery", "Port audit", "Web crawl", "Vulnerability audit", "Report assembly" };
+    public static readonly string[] PhaseNames = { "Host discovery", "Port audit", "Vulnerability audit", "Web crawl", "Report assembly" };
 
     private readonly Dictionary<string, HostRecord> _hostsByIp = new();
     private readonly Dictionary<int, TaskItem> _tasksById = new();

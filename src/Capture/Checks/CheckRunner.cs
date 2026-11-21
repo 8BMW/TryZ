@@ -20,8 +20,8 @@ internal sealed class CheckContext
     public int Failed { get; private set; }
     public IReadOnlyList<string> Lines => _lines;
 
-    /// <summary>Scratch folder for files a check writes; created on first use and emptied per run.</summary>
-    public string TempDir { get; } = Path.Combine(Path.GetTempPath(), "tryz-checks");
+    /// <summary>Unique scratch folder for files written by this check run.</summary>
+    public string TempDir { get; } = Path.Combine(Path.GetTempPath(), "tryz-checks", Guid.NewGuid().ToString("N"));
 
     internal void Begin(string suite)
     {
@@ -61,7 +61,6 @@ internal static class CheckRunner
             .ToList();
 
         var c = new CheckContext();
-        if (Directory.Exists(c.TempDir)) Directory.Delete(c.TempDir, recursive: true);
         Directory.CreateDirectory(c.TempDir);
         var sw = Stopwatch.StartNew();
         foreach (var suite in suites)

@@ -108,6 +108,7 @@ internal static class ScanPipeline
                         if (vhost is null) continue;
                         var aliasRoot = await HttpAudit.AuditAsync(ctx, vhost).ConfigureAwait(false);
                         if (aliasRoot != null) lock (rootsLock) webRoots.Add(aliasRoot);
+                        await DetectionRules.RunHttpRulesAsync(ctx, vhost).ConfigureAwait(false);
                     }
                 }
                 ctx.UpdateTask(task, TaskState.Done, 100);

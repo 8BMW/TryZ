@@ -260,7 +260,7 @@ internal sealed class StatusPanel : SkinControl
         {
             ScanState.Running => Theme.Ok,
             ScanState.Paused => Theme.Medium,
-            ScanState.Stopped => Theme.Critical,
+            ScanState.Stopped or ScanState.Failed => Theme.Critical,
             ScanState.Completed => Theme.Low,
             _ => Theme.Hex(0x565C63),
         };
