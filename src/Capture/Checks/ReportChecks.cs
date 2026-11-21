@@ -113,6 +113,12 @@ internal sealed class ReportChecks : ICheckSuite
         string webSarif = File.ReadAllText(Export(ExportFormat.Sarif, web));
         using (var doc = JsonDocument.Parse(webSarif))
             c.Equal("web review SARIF filtered too", ReportScope.For(ReportTemplate.WebReview).SelectFindings(s).Count, doc.RootElement.GetProperty("runs")[0].GetProperty("results").GetArrayLength());
+        var vhost = new Session();
+        vhost.Apply(new HostFound(new HostRecord { Ip = "192.0.2.50", Hostname = "shop.example.test", OsGuess = "", LatencyMs = 1, Ttl = 64, Role = "" }));
+        vhost.Apply(new PortFound(new PortRecord { HostIp = "192.0.2.50", Port = 8081, Proto = "tcp", State = "open", Service = "unknown", Banner = "", Risk = Severity.Info }));
+        vhost.Apply(new UrlBatch([new UrlRecord { Host = "shop.example.test:8081", Path = "/", Url = "http://shop.example.test:8081/", Method = "GET", Status = 200, ContentType = "text/html", Size = 1, TimeMs = 1 }]));
+        vhost.Apply(new FindingFound(F(1, Severity.Low, "Thing on the shop", "192.0.2.50", 8081, "Fix.")));
+        c.Equal("crawled vhost port counts as web", 1, web.SelectFindings(vhost).Count);
         c.Check("RPC over HTTP is not web", !ReportScope.IsWebService("http-rpc-epmap") && ReportScope.IsWebService("ssl/http") && ReportScope.IsWebService("HTTPS"));
 
         using (var doc = JsonDocument.Parse(File.ReadAllText(Export(ExportFormat.Json, remediation))))

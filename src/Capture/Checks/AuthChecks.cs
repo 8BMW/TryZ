@@ -16,6 +16,7 @@ internal sealed class AuthChecks : ICheckSuite
     {
         ScopeChecks(c);
         SettingsChecks(c);
+        await HandlerChecks(c);
         await LiveChecks(c);
     }
 
@@ -47,11 +48,48 @@ internal sealed class AuthChecks : ICheckSuite
         var v6 = new AuthHeader("[2001:db8::1]:8443", "Cookie", "s=1");
         c.Check("IPv6 scope matches", v6.Matches(new Uri("https://[2001:db8:0::1]:8443/")));
 
+        var ipScope = new AuthHeader("192.0.2.10", "Cookie", "s=1");
+        Func<string, IPAddress?> pins = n => n == "app.example.test" ? IPAddress.Parse("192.0.2.10") : null;
+        c.Check("IP scope applies to a name pinned to it", ipScope.Matches(new Uri("https://app.example.test/"), pins));
+        c.Check("IP scope ignores an unpinned name", !ipScope.Matches(new Uri("https://other.example.test/"), pins));
+        c.Check("IP scope without a resolver stays literal", !ipScope.Matches(new Uri("https://app.example.test/")));
+
         var headers = new[] { new AuthHeader("a.test", "Cookie", "sid=abc123secret; theme=dark"), new AuthHeader("a.test", "Authorization", "Bearer eyJtoken.value") };
         string redacted = AuthHandler.Redact("Set-Cookie: sid=abc123secret\nEcho: eyJtoken.value\ntheme=dark", headers);
         c.Check("cookie value redacted", !redacted.Contains("abc123secret"));
         c.Check("bearer token redacted", !redacted.Contains("eyJtoken.value"));
         c.Check("redaction keeps the rest", redacted.Contains("Set-Cookie: sid=[redacted]"));
+    }
+
+    private static async Task HandlerChecks(CheckContext c)
+    {
+        var warnings = new List<string>();
+        var codes = new Queue<HttpStatusCode>(Enumerable.Repeat(HttpStatusCode.OK, 300).Concat(Enumerable.Repeat(HttpStatusCode.Unauthorized, 12)));
+        var stub = new StubHandler(() => codes.Count > 0 ? codes.Dequeue() : HttpStatusCode.OK);
+        var used = new AuthHeader("a.test", "Cookie", "sid=1");
+        var unused = new AuthHeader("typo.test", "Cookie", "sid=2");
+        using var handler = new AuthHandler(stub, [used, unused], warnings.Add);
+        using var client = new HttpClient(handler);
+        for (int i = 0; i < 312; i++) using (await client.GetAsync("http://a.test/p" + i)) { }
+        c.Equal("expiry warned after many earlier successes", 1, warnings.Count(w => w.Contains("in a row")));
+        c.Check("handler sent the cookie", stub.LastCookie == "sid=1");
+        c.Check("unused scope is reported", handler.Unused.SequenceEqual([unused]));
+        warnings.Clear();
+        codes = new Queue<HttpStatusCode>(Enumerable.Range(0, 40).Select(i => i % 5 == 0 ? HttpStatusCode.Unauthorized : HttpStatusCode.OK));
+        using var handler2 = new AuthHandler(new StubHandler(() => codes.Count > 0 ? codes.Dequeue() : HttpStatusCode.OK), [used], warnings.Add);
+        using var client2 = new HttpClient(handler2);
+        for (int i = 0; i < 40; i++) using (await client2.GetAsync("http://a.test/q" + i)) { }
+        c.Equal("scattered protected pages don't trip it", 0, warnings.Count);
+    }
+
+    private sealed class StubHandler(Func<HttpStatusCode> next) : HttpMessageHandler
+    {
+        public string? LastCookie;
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Headers.TryGetValues("Cookie", out var v)) LastCookie = string.Join("; ", v);
+            return Task.FromResult(new HttpResponseMessage(next()));
+        }
     }
 
     private static void SettingsChecks(CheckContext c)
@@ -143,6 +181,15 @@ internal sealed class AuthChecks : ICheckSuite
         await foreach (var e in channel.Reader.ReadAllAsync())
             if (e is ScanLog { Source: "auth" } log) warnings.Add(log.Text);
         c.Equal("expired session warned once", 1, warnings.Count(w => w.Contains("expired")));
+        var unusedChannel = Channel.CreateUnbounded<ScanEvent>();
+        using (var unusedCtx = new ScanContext(new ScanRequest("127.0.0.1", 0, 1, new ScanOptions { Threads = 1, Auth = [new AuthHeader("typo.example", "Cookie", "a=bcde")] }), unusedChannel.Writer, CancellationToken.None))
+        {
+            unusedCtx.ReportUnusedAuth();
+            unusedChannel.Writer.TryComplete();
+            bool warned = false;
+            await foreach (var e in unusedChannel.Reader.ReadAllAsync()) warned |= e is ScanLog { Source: "auth" } l && l.Text.Contains("typo.example") && l.Text.Contains("never sent");
+            c.Check("scan end warns about a scope that matched nothing", warned);
+        }
         using var follow = await ctx.HttpFollow.GetAsync(new Uri($"http://127.0.0.1:{site.Port}/account"));
         c.Check("redirect-following client never authenticates", follow.StatusCode == HttpStatusCode.Unauthorized);
     }

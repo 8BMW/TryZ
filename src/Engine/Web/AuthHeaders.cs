@@ -75,13 +75,24 @@ internal sealed record AuthHeader(string Scope, string Name, string Value)
         return true;
     }
 
-    public bool Matches(Uri uri)
+    /// <param name="resolve">
+    /// Maps a URL host name to the address the scan pinned it to, so an IP scope still applies when the target was
+    /// typed as a name. It never consults DNS: an unpinned name can't borrow an IP scope.
+    /// </param>
+    public bool Matches(Uri uri, Func<string, IPAddress?>? resolve = null)
     {
         if (!TryParseScope(Scope, out string host, out int? port, out bool wildcard)) return false;
         if (port is int p && uri.Port != p) return false;
         string target = uri.Host.Trim('[', ']').TrimEnd('.');
         if (wildcard) return target.EndsWith("." + host, StringComparison.OrdinalIgnoreCase);
-        if (IPAddress.TryParse(host, out var a) && IPAddress.TryParse(target, out var b)) return a.Equals(b);
+        if (IPAddress.TryParse(host, out var a))
+        {
+            var b = IPAddress.TryParse(target, out var literal) ? literal : resolve?.Invoke(target);
+            if (b == null) return false;
+            if (a.IsIPv4MappedToIPv6) a = a.MapToIPv4();
+            if (b.IsIPv4MappedToIPv6) b = b.MapToIPv4();
+            return a.Equals(b);
+        }
         return string.Equals(target, host, StringComparison.OrdinalIgnoreCase);
     }
 }
@@ -95,22 +106,36 @@ internal sealed class AuthHandler : DelegatingHandler
     private const int ExpiryThreshold = 10;
     private readonly IReadOnlyList<AuthHeader> _headers;
     private readonly Action<string> _warn;
-    private int _rejected, _accepted, _warned;
+    private readonly Func<string, IPAddress?>? _resolve;
+    private readonly bool[] _used;
+    private int _rejected, _accepted, _rejectedRun, _warned;
 
-    public AuthHandler(HttpMessageHandler inner, IReadOnlyList<AuthHeader> headers, Action<string> warn) : base(inner)
+    public AuthHandler(HttpMessageHandler inner, IReadOnlyList<AuthHeader> headers, Action<string> warn, Func<string, IPAddress?>? resolve = null) : base(inner)
     {
         _headers = headers;
         _warn = warn;
+        _resolve = resolve;
+        _used = new bool[headers.Count];
     }
 
     public int AuthenticatedRequests => Volatile.Read(ref _accepted) + Volatile.Read(ref _rejected);
+
+    /// <summary>Configured entries that no request matched: usually a scope typo or a target typed differently.</summary>
+    public IEnumerable<AuthHeader> Unused => _headers.Where((_, i) => !Volatile.Read(ref _used[i]));
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         bool applied = false;
         if (request.RequestUri is { IsAbsoluteUri: true } uri)
         {
-            foreach (var group in _headers.Where(h => h.Matches(uri)).GroupBy(h => h.Name, StringComparer.OrdinalIgnoreCase))
+            var matching = new List<AuthHeader>();
+            for (int i = 0; i < _headers.Count; i++)
+            {
+                if (!_headers[i].Matches(uri, _resolve)) continue;
+                matching.Add(_headers[i]);
+                Volatile.Write(ref _used[i], true);
+            }
+            foreach (var group in matching.GroupBy(h => h.Name, StringComparer.OrdinalIgnoreCase))
             {
                 request.Headers.Remove(group.Key);
                 // Several cookie entries for one host belong in one Cookie header; anything else, last one wins.
@@ -124,12 +149,22 @@ internal sealed class AuthHandler : DelegatingHandler
         var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         if (applied)
         {
-            if (response.StatusCode is HttpStatusCode.Unauthorized) Interlocked.Increment(ref _rejected);
-            else Interlocked.Increment(ref _accepted);
-            // Lots of 401s with the credential attached and few successes: the session most likely expired or was never valid.
-            if (Volatile.Read(ref _rejected) >= ExpiryThreshold && Volatile.Read(ref _rejected) > Volatile.Read(ref _accepted)
-                && Interlocked.Exchange(ref _warned, 1) == 0)
-                _warn($"{Volatile.Read(ref _rejected)} authenticated request(s) were answered 401 Unauthorized. The session cookie or token may have expired; refresh it in Options > Engine > Authentication.");
+            int run;
+            if (response.StatusCode is HttpStatusCode.Unauthorized)
+            {
+                Interlocked.Increment(ref _rejected);
+                run = Interlocked.Increment(ref _rejectedRun);
+            }
+            else
+            {
+                Interlocked.Increment(ref _accepted);
+                Interlocked.Exchange(ref _rejectedRun, 0);
+                run = 0;
+            }
+            // A run of 401s with the credential attached, however many successes came before: the session expired
+            // mid-scan (or was never valid). A single protected page now and then doesn't reset-and-trip this.
+            if (run >= ExpiryThreshold && Interlocked.Exchange(ref _warned, 1) == 0)
+                _warn($"{run} authenticated requests in a row were answered 401 Unauthorized. The session cookie or token has probably expired; refresh it in Options > Engine > Authentication and scan again.");
         }
         return response;
     }

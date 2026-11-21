@@ -159,6 +159,7 @@ internal static class ScanPipeline
         int report = ctx.AddTask("Assemble session summary", "Reports");
         ctx.UpdateTask(report, TaskState.Done, 100);
         ctx.SetPhase(ScanContext.PhaseReport, 1);
+        ctx.ReportUnusedAuth();
         ctx.Log(LogLevel.Ok, "engine", $"Scan finished in {ctx.ElapsedSeconds:0.0} s: {hosts.Count} host(s), {services.Count} open service(s), {ctx.FindingCount} finding(s)");
     }
 

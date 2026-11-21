@@ -31,6 +31,7 @@ internal sealed class ScanContext : IDisposable
     private readonly double[] _phase = new double[5];
     private readonly HttpClient _http;
     private readonly HttpClient _httpFollow;
+    private AuthHandler? _auth;
     private TaskCompletionSource _resume = CreateResumed();
     // Completed while paused; replaced by a fresh (pending) source on resume.
     private TaskCompletionSource _pauseStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -391,7 +392,7 @@ internal sealed class ScanContext : IDisposable
         // Credentials only ride on the non-redirecting client: a redirect to another host must not take them along.
         HttpMessageHandler pipeline = handler;
         if (!followRedirects && auth is { Count: > 0 })
-            pipeline = new AuthHandler(handler, auth, text => Log(LogLevel.Warn, "auth", text));
+            pipeline = _auth = new AuthHandler(handler, auth, text => Log(LogLevel.Warn, "auth", text), PinnedAddress);
         var client = new HttpClient(pipeline, disposeHandler: true)
         {
             Timeout = TimeSpan.FromMilliseconds(Options.ConnectTimeoutMs + Options.ReadTimeoutMs),
@@ -435,6 +436,14 @@ internal sealed class ScanContext : IDisposable
             socket.Dispose();
             throw;
         }
+    }
+
+    /// <summary>Warns about authentication entries that never matched a request, once the scan has finished.</summary>
+    public void ReportUnusedAuth()
+    {
+        if (_auth == null) return;
+        foreach (var a in _auth.Unused)
+            Log(LogLevel.Warn, "auth", $"{a.Name} for {a.Scope} was never sent: no request went to that host. Check the scope against the target as typed (name or address, and port).");
     }
 
     public void Dispose()

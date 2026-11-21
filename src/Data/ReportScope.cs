@@ -79,8 +79,18 @@ internal sealed record ReportScope
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in s.Ports.Items)
             if (p.State == "open" && IsWebService(p.Service)) set.Add($"{p.HostIp}|{p.Port}");
+        // Crawled URLs carry the name as typed, findings carry the address: record both so either side matches.
+        var ipsByName = s.Hosts.Items.Where(h => h.Hostname.Length > 0)
+            .GroupBy(h => h.Hostname.TrimEnd('.'), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Select(h => h.Ip).ToList(), StringComparer.OrdinalIgnoreCase);
         foreach (var u in s.Urls.Items)
-            if (Uri.TryCreate(u.Url, UriKind.Absolute, out var uri)) set.Add($"{uri.Host}|{uri.Port}");
+        {
+            if (!Uri.TryCreate(u.Url, UriKind.Absolute, out var uri)) continue;
+            string host = uri.Host.Trim('[', ']').TrimEnd('.');
+            set.Add($"{host}|{uri.Port}");
+            if (ipsByName.TryGetValue(host, out var ips))
+                foreach (string ip in ips) set.Add($"{ip}|{uri.Port}");
+        }
         return set;
     }
 

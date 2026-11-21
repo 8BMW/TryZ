@@ -663,7 +663,14 @@ internal sealed class OptionsDialog : SkinDialog
             }
             // Same host and header replaces the old value: that's how a refreshed session cookie gets in.
             _auth.RemoveAll(a => string.Equals(a.Scope, s, StringComparison.OrdinalIgnoreCase) && string.Equals(a.Name, n, StringComparison.OrdinalIgnoreCase));
-            _auth.Add(new AuthHeaderSetting { Scope = s, Name = n, Secret = SecretStore.Protect(v) });
+            string secret;
+            try { secret = SecretStore.Protect(v); }
+            catch (System.Security.Cryptography.CryptographicException ex)
+            {
+                MessageDialog.Show(this, "Authentication", $"Windows could not encrypt the value for your account, so it was not saved: {ex.Message}", IconId.Warning);
+                return;
+            }
+            _auth.Add(new AuthHeaderSetting { Scope = s, Name = n, Secret = secret });
             value.Value = string.Empty;
             RefreshAuth();
         }

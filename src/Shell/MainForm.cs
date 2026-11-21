@@ -705,7 +705,8 @@ internal sealed class MainForm : FrameForm, IShell
         {
             ReportExporter.Write(path, format, _session, _settings, scope);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+        // PDFsharp reports font and layout problems as InvalidOperationException; JSON rejects some values with ArgumentException.
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or InvalidOperationException or ArgumentException)
         {
             Notify("Export", $"The file could not be written: {ex.Message}", IconId.Warning);
             return false;
