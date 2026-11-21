@@ -144,10 +144,4 @@ internal sealed class RemediationView : ModuleView
         }
         UpdateCaption();
     }
-
-    public override void PrepareForCapture()
-    {
-        SyncData();
-        if (_rows.Count > 0) _grid.SelectRow(0);
-    }
 }

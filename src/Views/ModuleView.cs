@@ -35,7 +35,6 @@ internal abstract class ModuleView : SkinControl
     protected Rectangle Body => Rectangle.FromLTRB(Px(5), HeaderHeight + Px(5), Width - Px(6), Height - Px(5));
 
     public abstract void SyncData();
-    public virtual void PrepareForCapture() { }
 
     protected override void OnPaint(PaintEventArgs e)
     {

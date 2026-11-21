@@ -136,17 +136,6 @@ internal static class UdpScanner
         return found;
     }
 
-#if DEBUG
-    internal static Task<bool> ProbeDnsForTestAsync(ScanContext ctx, IPAddress address, int port) =>
-        ProbeAsync(ctx, address, CreateProbes()[0] with { Port = port });
-
-    internal static (byte[] Request, Func<byte[], bool> Matches) ProbeForTest(string name)
-    {
-        var probe = CreateProbes().Single(p => p.Name == name);
-        return (probe.Request, probe.Matches);
-    }
-#endif
-
     private static async Task<bool> ProbeAsync(ScanContext ctx, IPAddress address, Probe probe)
     {
         for (int attempt = 0; attempt <= ctx.Options.Retries; attempt++)

@@ -107,11 +107,6 @@ internal static class Native
     [DllImport("shell32.dll")]
     public static extern UIntPtr SHAppBarMessage(uint message, ref APPBARDATA data);
 
-#if DEBUG
-    [DllImport("user32.dll")]
-    public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
-#endif
-
     public static bool TaskbarAutoHides()
     {
         const uint ABM_GETSTATE = 4;

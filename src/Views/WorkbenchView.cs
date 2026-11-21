@@ -25,7 +25,6 @@ internal sealed class WorkbenchView : ModuleView
     private readonly SkinLabel _reqStats = new() { TextColor = Theme.TextDim, Alignment = TextFormatFlags.Right };
     private readonly SplitBox _split;
     private CancellationTokenSource? _inFlight;
-    private Task _lastSend = Task.CompletedTask;
     private bool _rewriting;
 
     public WorkbenchView(IShell shell) : base(shell)
@@ -59,18 +58,6 @@ internal sealed class WorkbenchView : ModuleView
     public override IconId IconKind => IconId.Workbench;
     public override string Subtitle => $"Raw HTTP/1.1 over TCP or TLS  |  {TimeoutSeconds} s timeout, {RawHttp.MaxResponseBytes / (1024 * 1024)} MB response cap";
 
-#if DEBUG
-    public string UrlText { get => _url.Value; set => _url.Value = value; }
-    public string RequestText => _request.Value;
-    public string ResponseText => _response.Value;
-    public string StatsText => _resStats.Caption;
-    public Task SendForTestAsync()
-    {
-        StartSend();
-        return _lastSend;
-    }
-#endif
-
     /// <summary>Loads a URL with a fresh request for it (used by the crawler, discovery and session views).</summary>
     public void Load(string method, string url)
     {
@@ -88,8 +75,6 @@ internal sealed class WorkbenchView : ModuleView
         _request.Value = BuildDefaultRequest();
         UpdateStats();
     }
-
-    public override void PrepareForCapture() => StartSend();
 
     private static string InitialUrl(string lastTarget)
     {
@@ -186,7 +171,7 @@ internal sealed class WorkbenchView : ModuleView
     private void StartSend()
     {
         if (_inFlight != null) return;
-        _lastSend = SendAsync();
+        _ = SendAsync();
     }
 
     private sealed record ParsedRequest(string Method, byte[] Bytes, string FirstLine);

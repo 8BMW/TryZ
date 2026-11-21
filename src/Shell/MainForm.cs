@@ -153,14 +153,6 @@ internal sealed class MainForm : FrameForm, IShell
     public AppSettings Settings => _settings;
     public bool PersistOnClose { get; set; } = true;
 
-#if DEBUG
-    public ScanEngine Engine => _engine;
-    public ModuleView[] Modules => _modules;
-    public TabHost DockHost => _dock;
-    public SkinMenuStrip MenuBar => _menu;
-    public TargetBar Target => _targetBar;
-#endif
-
     private void RestorePlacement()
     {
         int w = _settings.WindowWidth > 0 ? _settings.WindowWidth : Px(1240);
@@ -180,16 +172,6 @@ internal sealed class MainForm : FrameForm, IShell
         }
         if (_settings.Maximized) WindowState = FormWindowState.Maximized;
     }
-
-#if DEBUG
-    public void SetCaptureBounds(Size logical)
-    {
-        StartPosition = FormStartPosition.Manual;
-        WindowState = FormWindowState.Normal;
-        var area = Screen.PrimaryScreen!.WorkingArea;
-        Bounds = new Rectangle(area.X + 8, area.Y + 8, Px(logical.Width), Px(logical.Height));
-    }
-#endif
 
     private ToolStripMenuItem MenuItem(ToolStripMenuItem parent, string text, IconId icon, Action action, Keys keys = Keys.None, string? display = null)
     {
@@ -332,15 +314,6 @@ internal sealed class MainForm : FrameForm, IShell
             if (c is SkinControl s) s.RefreshDpi();
     }
 
-#if DEBUG
-    public void ApplyOverrideDpi()
-    {
-        OnDpiApplied();
-        ApplyMinimum();
-        PerformLayout();
-    }
-#endif
-
     protected override int HitTestExtra(Point client)
     {
         if (WindowState != FormWindowState.Normal) return 0;
@@ -385,18 +358,6 @@ internal sealed class MainForm : FrameForm, IShell
         for (int i = 0; i < _moduleItems.Count; i++) _moduleItems[i].Checked = i == index;
         _settings.LastModule = index;
     }
-
-#if DEBUG
-    public void PerformCommand(string name)
-    {
-        switch (name)
-        {
-            case "Pause": PauseScan(); break;
-            case "Stop": StopScan(); break;
-            case "New": NewSession(); break;
-        }
-    }
-#endif
 
     public void NavigateTo(int module) => _nav.SelectedModule = module;
 
@@ -966,11 +927,6 @@ internal sealed class TargetBar : SkinControl
 
     public void ClearFilter() => _filter.Value = string.Empty;
     public void FocusFilter() => _filter.Edit.Focus();
-#if DEBUG
-    public void SetFilterForCapture(string text) => _filter.Value = text;
-    public void SetTargetForTest(string text) => _target.Value = text;
-    public SkinCombo ProfileCombo => _profile;
-#endif
 
     public void SetScanState(ScanState state)
     {

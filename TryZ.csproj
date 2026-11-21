@@ -38,8 +38,8 @@
     <EmbeddedResource Include="assets\logo.txt" LogicalName="TryZ.logo.txt" />
     <EmbeddedResource Include="assets\tryz.ico" LogicalName="TryZ.tryz.ico" />
     <EmbeddedResource Include="assets\data\**\*" LogicalName="TryZ.data.%(RecursiveDir)%(Filename)%(Extension)" />
-    <Compile Remove="dist\**;.review\**;tools\**" />
-    <None Remove="dist\**;.review\**;tools\**" />
+    <Compile Remove="dist\**;.review\**" />
+    <None Remove="dist\**;.review\**" />
   </ItemGroup>
 
   <ItemGroup>

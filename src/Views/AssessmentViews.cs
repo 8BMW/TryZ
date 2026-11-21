@@ -253,12 +253,6 @@ internal sealed class DiscoveryView : ModuleView
         else Shell.NavigateTo(2);
     }
 
-    public override void PrepareForCapture()
-    {
-        SyncData();
-        if (_rows.Count > 2) _grid.SelectRow(2);
-    }
-
     private void ShowDetail()
     {
         _detailStore.Clear();
@@ -401,12 +395,6 @@ internal sealed class PortAuditView : ModuleView
     public override string Title => "Port Audit";
     public override IconId IconKind => IconId.PortAudit;
     public override string Subtitle => $"{Session.Ports.Items.Count} services on {Session.Hosts.Items.Count} hosts";
-
-    public override void PrepareForCapture()
-    {
-        SyncData();
-        if (_hostRows.Count > 12) _hosts.SelectRow(12);
-    }
 
     public void SelectHost(string ip)
     {
@@ -610,13 +598,5 @@ internal sealed class VulnerabilityView : ModuleView
     {
         if (_rows.Sync(Session.FilterText)) _grid.Sync();
         Invalidate(new Rectangle(0, 0, Width, HeaderHeight));
-    }
-
-    public override void PrepareForCapture()
-    {
-        SyncData();
-        _rows.SetSort(0, descending: true);
-        _grid.Sync();
-        if (_rows.Count > 0) _grid.SelectRow(0);
     }
 }

@@ -11,12 +11,6 @@ internal static class Program
         ApplicationConfiguration.Initialize();
         try
         {
-#if DEBUG
-            if (args.Contains("--selftest")) return TryZ.Capture.SelfTest.Run();
-            if (args.Contains("--checks")) return TryZ.Capture.Checks.CheckRunner.Run(args);
-            var capture = TryZ.Capture.CaptureOptions.Parse(args);
-            if (capture != null) return TryZ.Capture.CaptureRunner.Run(capture);
-#endif
             var settings = AppSettings.Load();
             if (settings.ShowSplash)
             {

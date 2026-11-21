@@ -314,9 +314,6 @@ internal sealed class SkinCombo : SkinControl
     }
 
     public bool DroppedDown => _drop.Visible;
-#if DEBUG
-    public SkinList ListForTest => _list;
-#endif
     public ToolStripDropDown DropDownWindow => _drop;
 
     public void AddRange(params string[] items) => _items.AddRange(items);

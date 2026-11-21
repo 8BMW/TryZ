@@ -111,10 +111,6 @@ internal sealed class MessageDialog : SkinDialog
         return dlg.ShowDialog(owner) == DialogResult.Yes;
     }
 
-#if DEBUG
-    public static MessageDialog ForCapture(string title, string text, IconId icon) => new(title, text, icon, false);
-#endif
-
     protected override void OnLayout(LayoutEventArgs e)
     {
         base.OnLayout(e);
@@ -151,11 +147,6 @@ internal sealed class AuthorizationDialog : SkinDialog
         _start.Enabled = false;
         _confirm.CheckedChanged += (_, _) => _start.Enabled = _confirm.Checked;
     }
-
-#if DEBUG
-    public SkinCheck ConfirmBox => _confirm;
-    public SkinButton StartButton => _start;
-#endif
 
     protected override void OnShown(EventArgs e)
     {
