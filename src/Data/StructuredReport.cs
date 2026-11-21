@@ -56,7 +56,7 @@ internal static class StructuredReport
     }
 
     // Treat external content as text; never pass HTML through to a rendered report.
-    private static string Md(string value) => WebUtility.HtmlEncode(value ?? string.Empty)
+    internal static string Md(string value) => WebUtility.HtmlEncode(value ?? string.Empty)
         .Replace("\\", "\\\\", StringComparison.Ordinal).Replace("*", "\\*", StringComparison.Ordinal)
         .Replace("_", "\\_", StringComparison.Ordinal).Replace("[", "\\[", StringComparison.Ordinal)
         .Replace("]", "\\]", StringComparison.Ordinal).Replace("`", "\\`", StringComparison.Ordinal)

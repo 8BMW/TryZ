@@ -9,6 +9,7 @@ internal sealed class RemediationView : ModuleView
     private readonly RowSet<Finding> _rows;
     private readonly SkinCheck _includeClosed = new("Include accepted / false positives");
     private readonly SkinLabel _count = new() { TextColor = Theme.TextDim };
+    private readonly SkinButton _export = new("Export Plan...", IconId.Export);
     private readonly SkinPanel _top = new();
     private readonly TextPane _detail = new();
     private readonly SplitBox _split;
@@ -32,11 +33,14 @@ internal sealed class RemediationView : ModuleView
         _grid.Source = _rows;
         _grid.SelectionChanged += (_, _) => ShowDetail();
         _includeClosed.CheckedChanged += (_, _) => { _rows.SetScope(IsVisible); _grid.Sync(); ShowDetail(); UpdateCaption(); };
-        _top.Controls.AddRange(new Control[] { _includeClosed, _count, _grid });
+        _export.Click += (_, _) => ExportPlan();
+        _top.Controls.AddRange(new Control[] { _includeClosed, _count, _export, _grid });
         _top.Layout += (_, _) =>
         {
+            int exportWidth = Px(118);
             _includeClosed.SetBounds(0, Px(3), Px(215), Px(18));
-            _count.SetBounds(Px(220), Px(3), Math.Max(0, _top.Width - Px(220)), Px(18));
+            _count.SetBounds(Px(220), Px(3), Math.Max(0, _top.Width - Px(225) - exportWidth), Px(18));
+            _export.SetBounds(Math.Max(0, _top.Width - exportWidth), 0, exportWidth, Px(22));
             _grid.SetBounds(0, Px(25), _top.Width, Math.Max(0, _top.Height - Px(25)));
         };
         _split = new SplitBox(false, _top, _detail, 210, fixSecond: true) { MinFirst = 120, MinSecond = 100 };
@@ -55,7 +59,39 @@ internal sealed class RemediationView : ModuleView
         _split.SetBounds(b.X, b.Y, b.Width, b.Height);
     }
 
-    private bool IsVisible(Finding f) => _includeClosed.Checked || f.Status is not (FindingStatus.Accepted or FindingStatus.FalsePositive);
+    private bool IsVisible(Finding f) => _includeClosed.Checked || RemediationPlan.IsOpen(f);
+
+    private void ExportPlan()
+    {
+        using var dialog = new SaveFileDialog
+        {
+            Title = "Export Remediation Plan",
+            Filter = "Markdown file (*.md)|*.md|CSV file (*.csv)|*.csv",
+            DefaultExt = "md",
+            AddExtension = true,
+            OverwritePrompt = true,
+            FileName = $"tryz-remediation-{DateTime.Now:yyyyMMdd-HHmm}.md",
+        };
+        if (dialog.ShowDialog(FindForm()) == DialogResult.OK) ExportPlanTo(dialog.FileName);
+    }
+
+    /// <summary>Writes the plan with the current include-closed choice; a .csv extension selects CSV, anything else Markdown.</summary>
+    internal bool ExportPlanTo(string path)
+    {
+        bool csv = string.Equals(Path.GetExtension(path), ".csv", StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            if (csv) File.WriteAllText(path, RemediationPlan.Csv(Session, _includeClosed.Checked), new System.Text.UTF8Encoding(true));
+            else File.WriteAllText(path, RemediationPlan.Markdown(Session, _includeClosed.Checked, Shell.Settings.ReportAuthorLine ?? string.Empty), new System.Text.UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException)
+        {
+            Shell.Notify("Remediation Plan", $"The file could not be written: {ex.Message}", IconId.Warning);
+            return false;
+        }
+        Shell.LogUser("report", $"Remediation plan ({(csv ? "CSV" : "Markdown")}) written to {path}");
+        return true;
+    }
 
     private static Color PriorityColor(PriorityTier tier) => tier switch
     {

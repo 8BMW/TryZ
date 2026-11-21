@@ -190,7 +190,7 @@ internal static class ReportWriter
     private static string Badge(Severity severity) =>
         $"<span class=\"sev\" style=\"background:{SeverityColors[(int)severity]}\">{SeverityNames[(int)severity]}</span>";
 
-    private static string Csv(string value)
+    internal static string Csv(string value)
     {
         // Neutralise spreadsheet formula injection, then quote.
         if (value.Length > 0 && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r') value = "'" + value;
