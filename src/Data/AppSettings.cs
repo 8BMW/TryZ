@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TryZ.Engine;
 
 namespace TryZ.Data;
 
@@ -45,7 +46,24 @@ internal sealed class AppSettings
     public bool UseCustomRules { get; set; } = true;
     public string RulesDirectory { get; set; } = string.Empty;
     public string LastCompareBaseline { get; set; } = string.Empty;
+    public bool UseAuthentication { get; set; } = true;
+    /// <summary>Per-host headers for authenticated scans. Values are DPAPI-encrypted, never stored in clear.</summary>
+    public List<AuthHeaderSetting> AuthHeaders { get; set; } = new();
     public string UserAgent { get; set; } = "TryZ-Scanner/1.0 (+authorized security assessment)";
+
+    /// <summary>Usable headers for a scan. Entries that fail validation or can't be decrypted here are left out.</summary>
+    public IReadOnlyList<AuthHeader> ResolveAuthHeaders()
+    {
+        var list = new List<AuthHeader>();
+        foreach (var a in AuthHeaders)
+        {
+            if (!a.Enabled || a.Secret.Length == 0) continue;
+            string? value = SecretStore.Unprotect(a.Secret);
+            if (value == null || AuthHeader.Validate(a.Scope, a.Name, value) != null) continue;
+            list.Add(new AuthHeader(a.Scope.Trim(), a.Name.Trim(), value));
+        }
+        return list;
+    }
 
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TryZ", "settings.json");
@@ -65,6 +83,13 @@ internal sealed class AppSettings
                 loaded.UserAgent ??= string.Empty;
                 loaded.RulesDirectory ??= string.Empty;
                 loaded.LastCompareBaseline ??= string.Empty;
+                loaded.AuthHeaders = (loaded.AuthHeaders ?? new()).Where(a => a != null).ToList();
+                foreach (var a in loaded.AuthHeaders)
+                {
+                    a.Scope ??= string.Empty;
+                    a.Name ??= string.Empty;
+                    a.Secret ??= string.Empty;
+                }
                 return loaded;
             }
         }
@@ -87,4 +112,13 @@ internal sealed class AppSettings
         {
         }
     }
+}
+
+internal sealed class AuthHeaderSetting
+{
+    public string Scope { get; set; } = string.Empty;
+    public string Name { get; set; } = "Cookie";
+    /// <summary>DPAPI blob (base64) of the header value; see <see cref="SecretStore"/>.</summary>
+    public string Secret { get; set; } = string.Empty;
+    public bool Enabled { get; set; } = true;
 }

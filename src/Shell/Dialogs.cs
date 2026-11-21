@@ -354,6 +354,9 @@ internal sealed class OptionsDialog : SkinDialog
     private readonly SkinLabel _pageTitle = new(string.Empty, true) { TextColor = Theme.Brass };
     private readonly List<string> _exclusions;
     private readonly List<string> _authorized;
+    private readonly List<AuthHeaderSetting> _auth;
+    private SkinCheck _useAuth = null!;
+    private SkinList _authList = null!;
     private SkinCheck _splash = null!;
     private SkinCheck _confirm = null!;
     private SkinCheck _autoscroll = null!;
@@ -387,6 +390,7 @@ internal sealed class OptionsDialog : SkinDialog
         _settings = settings;
         _exclusions = settings.Exclusions.ToList();
         _authorized = settings.AuthorizedTargets.ToList();
+        _auth = settings.AuthHeaders.Select(a => new AuthHeaderSetting { Scope = a.Scope, Name = a.Name, Secret = a.Secret, Enabled = a.Enabled }).ToList();
         Controls.Add(_tree);
         Controls.Add(_pageTitle);
 
@@ -400,6 +404,7 @@ internal sealed class OptionsDialog : SkinDialog
         AddPage(engine, "UDP Services", BuildUdp());
         AddPage(engine, "Threat Intelligence", BuildIntel());
         AddPage(engine, "Detection Rules", BuildRules());
+        AddPage(engine, "Authentication", BuildAuth());
         AddPage(null, "Logging", BuildLogging());
         AddPage(null, "Reports", BuildReports());
         scan.Expanded = true;
@@ -632,6 +637,65 @@ internal sealed class OptionsDialog : SkinDialog
         return Stack(g);
     }
 
+    private Control BuildAuth()
+    {
+        var g = new EtchedGroup("Authenticated Scanning");
+        _useAuth = g.Add(null, new SkinCheck("Send these headers to matching hosts during scans", _settings.UseAuthentication), height: 17);
+        _authList = new SkinList();
+        RefreshAuth();
+        g.Add(null, _authList, height: 110);
+        var scope = new TextField(cue: "app.example.com, 10.0.0.5:8443 or *.example.com") { Mono = true };
+        var name = new TextField(cue: "Cookie") { Mono = true };
+        g.AddRow("Host", 22, (scope, 0), (new SkinLabel("Header"), 46), (name, 120));
+        var value = new TextField(cue: "session=... or Bearer eyJ...") { Mono = true };
+        value.Edit.UseSystemPasswordChar = true;
+        var add = new SkinButton("Add");
+        var remove = new SkinButton("Remove");
+        g.AddRow("Value", 22, (value, 0), (add, 66), (remove, 66));
+        void AddEntry()
+        {
+            string s = scope.Value.Trim(), n = name.Value.Trim(), v = value.Value.Trim();
+            if (n.Length == 0) n = "Cookie";
+            if (AuthHeader.Validate(s, n, v) is string error)
+            {
+                MessageDialog.Show(this, "Authentication", error, IconId.Warning);
+                return;
+            }
+            // Same host and header replaces the old value: that's how a refreshed session cookie gets in.
+            _auth.RemoveAll(a => string.Equals(a.Scope, s, StringComparison.OrdinalIgnoreCase) && string.Equals(a.Name, n, StringComparison.OrdinalIgnoreCase));
+            _auth.Add(new AuthHeaderSetting { Scope = s, Name = n, Secret = SecretStore.Protect(v) });
+            value.Value = string.Empty;
+            RefreshAuth();
+        }
+        add.Click += (_, _) => AddEntry();
+        value.Edit.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode != Keys.Return) return;
+            AddEntry();
+            e.SuppressKeyPress = true;
+        };
+        remove.Click += (_, _) =>
+        {
+            int i = _authList.SelectedIndex;
+            if (i < 0 || i >= _auth.Count) return;
+            _auth.RemoveAt(i);
+            RefreshAuth();
+        };
+        g.Add(null, Note("Headers go only to the host (and port) they are scoped to, never to other sites or through redirects. Values are encrypted for your Windows account and masked in findings. "
+            + "Logout and delete links are not followed, but the session can still expire; a warning appears in the log when requests keep coming back 401."), height: 58);
+        return Stack(g);
+    }
+
+    private void RefreshAuth()
+    {
+        _authList.SetItems(_auth.Select(a =>
+        {
+            bool readable = SecretStore.Unprotect(a.Secret) != null;
+            string state = !readable ? "(saved by another user; enter again)" : a.Enabled ? "••••••" : "(disabled)";
+            return new ListRow($"{a.Scope}    {a.Name}: {state}", readable ? IconId.Globe : IconId.Warning);
+        }).ToList());
+    }
+
     private Control BuildLogging()
     {
         var g = new EtchedGroup("Activity Log");
@@ -693,6 +757,8 @@ internal sealed class OptionsDialog : SkinDialog
         _settings.CheckTakeover = _takeover.Checked;
         _settings.UseCustomRules = _customRules.Checked;
         _settings.RulesDirectory = _rulesDir.Value.Trim();
+        _settings.UseAuthentication = _useAuth.Checked;
+        _settings.AuthHeaders = _auth.ToList();
         _settings.ReportAuthorLine = _footer.Value;
         _settings.Save();
         return true;

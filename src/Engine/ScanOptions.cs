@@ -38,6 +38,8 @@ internal sealed class ScanOptions
     public bool UseCustomRules { get; init; }
     public string RulesDirectory { get; init; } = string.Empty;
     public string UserAgent { get; init; } = "TryZ-Scanner/1.0 (+authorized security assessment)";
+    /// <summary>Headers sent to matching hosts only (session cookies, bearer tokens). Empty for an unauthenticated scan.</summary>
+    public IReadOnlyList<AuthHeader> Auth { get; init; } = Array.Empty<AuthHeader>();
 
     public static ScanOptions From(AppSettings s, int profileIndex, int threads)
     {
@@ -81,5 +83,6 @@ internal sealed class ScanOptions
         UseCustomRules = s.UseCustomRules,
         RulesDirectory = string.IsNullOrWhiteSpace(s.RulesDirectory) ? DefaultRulesDirectory : s.RulesDirectory.Trim(),
         UserAgent = string.IsNullOrWhiteSpace(s.UserAgent) ? "TryZ-Scanner/1.0 (+authorized security assessment)" : s.UserAgent,
+        Auth = s.UseAuthentication ? s.ResolveAuthHeaders() : Array.Empty<AuthHeader>(),
     };
 }

@@ -21,6 +21,12 @@ internal static class ScanPipeline
             return;
         }
         ctx.Log(LogLevel.Info, "discover", $"{targets.Count} address(es) in scope");
+        if (ctx.Options.Auth.Count > 0)
+        {
+            // Names and scopes only; values never reach the log.
+            string list = string.Join(", ", ctx.Options.Auth.Select(a => $"{a.Name} for {a.Scope}").Distinct(StringComparer.OrdinalIgnoreCase));
+            ctx.Log(LogLevel.Notice, "auth", $"Authenticated scan: {list}. Logout, sign-out and delete links are never followed.");
+        }
         foreach (var t in targets)
         {
             if (t.Hostname.Length > 0) ctx.NoteHostname(t.Hostname);

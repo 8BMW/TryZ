@@ -52,7 +52,7 @@ internal sealed class ScanContext : IDisposable
         Concurrency = new SemaphoreSlim(Options.Threads, Options.Threads);
         foreach (var ex in Options.Exclusions)
             if (IpRange.TryParse(ex, out var range)) _exclusions.Add(range);
-        _http = CreateClient(followRedirects: false);
+        _http = CreateClient(followRedirects: false, Options.Auth);
         _httpFollow = CreateClient(followRedirects: true);
     }
 
@@ -249,6 +249,9 @@ internal sealed class ScanContext : IDisposable
         string proto = details?.Proto is { Length: > 0 } p ? p : "tcp";
         lock (_findingKeys)
             if (!_findingKeys.Add($"{title}|{host}|{proto}/{port}")) return false;
+        // A page seen with the user's session can echo the cookie or token back; never store it.
+        evidence = AuthHandler.Redact(evidence, Options.Auth);
+        description = AuthHandler.Redact(description, Options.Auth);
         var f = new Finding
         {
             Id = Interlocked.Increment(ref _findingId),
@@ -365,7 +368,7 @@ internal sealed class ScanContext : IDisposable
 
     // ---------------------------------------------------------------- http
 
-    private HttpClient CreateClient(bool followRedirects)
+    private HttpClient CreateClient(bool followRedirects, IReadOnlyList<AuthHeader>? auth = null)
     {
         var handler = new SocketsHttpHandler
         {
@@ -384,7 +387,11 @@ internal sealed class ScanContext : IDisposable
                 RemoteCertificateValidationCallback = static (_, _, _, _) => true,
             },
         };
-        var client = new HttpClient(handler, disposeHandler: true)
+        // Credentials only ride on the non-redirecting client: a redirect to another host must not take them along.
+        HttpMessageHandler pipeline = handler;
+        if (!followRedirects && auth is { Count: > 0 })
+            pipeline = new AuthHandler(handler, auth, text => Log(LogLevel.Warn, "auth", text));
+        var client = new HttpClient(pipeline, disposeHandler: true)
         {
             Timeout = TimeSpan.FromMilliseconds(Options.ConnectTimeoutMs + Options.ReadTimeoutMs),
             MaxResponseContentBufferSize = 8 * 1024 * 1024,

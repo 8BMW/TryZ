@@ -24,6 +24,11 @@ internal sealed class TestSite : IDisposable
 
     public int Port => ((IPEndPoint)_listener.LocalEndpoint).Port;
     public int Requests;
+    /// <summary>Requests that carried the test credential (see <see cref="Credential"/>).</summary>
+    public int AuthenticatedRequests;
+
+    /// <summary>Session cookie value that unlocks /account; the same value works as a Bearer token.</summary>
+    public const string Credential = "letmein-7f3a";
 
     /// <summary>Web ports from the top-100 list, in order of preference, so every scan profile probes the site.</summary>
     public static readonly int[] CandidatePorts = { 8080, 8000, 8008, 8081, 8888, 3000, 5000, 9999 };
@@ -99,14 +104,19 @@ internal sealed class TestSite : IDisposable
                     head.Append(Encoding.Latin1.GetString(buffer, 0, n));
                 }
                 Interlocked.Increment(ref Requests);
-                var first = head.ToString().Split("\r\n")[0].Split(' ');
+                var lines = head.ToString().Split("\r\n");
+                var first = lines[0].Split(' ');
+                bool authed = lines.Skip(1).Any(l =>
+                    (l.StartsWith("Cookie:", StringComparison.OrdinalIgnoreCase) && l.Contains("tryz_session=" + Credential, StringComparison.Ordinal))
+                    || l.Equals("Authorization: Bearer " + Credential, StringComparison.OrdinalIgnoreCase));
+                if (authed) Interlocked.Increment(ref AuthenticatedRequests);
                 string method = first.Length > 0 ? first[0] : "GET";
                 string path = first.Length > 1 ? first[1] : "/";
                 int q = path.IndexOf('?');
                 if (q >= 0) path = path[..q];
-                var (status, type, body) = Route(path);
+                var (status, type, body) = Route(path, authed);
                 byte[] payload = Encoding.UTF8.GetBytes(body);
-                string reason = status switch { 200 => "OK", 404 => "Not Found", _ => "Error" };
+                string reason = status switch { 200 => "OK", 401 => "Unauthorized", 404 => "Not Found", _ => "Error" };
                 string headers =
                     $"HTTP/1.1 {status} {reason}\r\n" +
                     "Server: TryZ-SelfTest/1.0\r\n" +
@@ -129,11 +139,13 @@ internal sealed class TestSite : IDisposable
         }
     }
 
-    private static (int Status, string Type, string Body) Route(string path)
+    private static (int Status, string Type, string Body) Route(string path, bool authed)
     {
         const string html = "text/html; charset=utf-8";
         return path switch
         {
+            // Not linked from the public pages, so only an authenticated scan that is pointed at it finds it.
+            "/account" => authed ? (200, html, Page("Account dashboard", "<p>Signed in.</p>")) : (401, html, Page("Sign in required", "<p>Please sign in.</p>")),
             "/" or "/index.html" => (200, html, Page("Test site home",
                 "<a href=\"/about.html\">About</a> <a href=\"/docs/index.html\">Docs</a> <a href=\"/contact.html\">Contact</a> " +
                 "<form method=\"get\" action=\"/search\"><input name=\"q\"><input type=\"submit\" value=\"Search\"></form>")),
