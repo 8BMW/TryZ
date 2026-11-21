@@ -2,6 +2,8 @@ namespace TryZ.Data;
 
 internal enum LogLevel { Debug, Info, Notice, Ok, Warn, Alert }
 internal enum FindingStatus { New, Confirmed, FalsePositive, Accepted }
+/// <summary>How the check knows. Firm: the response itself shows the issue. Tentative: inferred, e.g. from a version banner that backports can make wrong.</summary>
+internal enum Confidence { Tentative, Firm }
 internal enum TaskState { Queued, Running, Done, Cancelled }
 internal enum ScanState { Idle, Running, Paused, Stopped, Completed, Failed }
 
@@ -42,6 +44,7 @@ internal sealed class Finding
     public required string Evidence { get; init; }
     public required string Remediation { get; init; }
     public FindingStatus Status { get; set; }
+    public Confidence Confidence { get; init; } = Confidence.Firm;
 
     /// <summary>Stable identifier of the check that produced the finding (e.g. "svc.telnet-exposed"). Used for diffing and SARIF.</summary>
     public string RuleId { get; init; } = string.Empty;
@@ -59,6 +62,10 @@ internal sealed class Finding
 
     public string CweText => $"CWE-{Cwe}";
     public string CveText => Cves.Count == 0 ? string.Empty : Cves.Count == 1 ? Cves[0] : $"{Cves[0]} +{Cves.Count - 1}";
+
+    /// <summary>Tentative until the analyst confirms it.</summary>
+    public bool NeedsVerification => Confidence == Confidence.Tentative && Status != FindingStatus.Confirmed;
+    public string ConfidenceText => Confidence == Confidence.Tentative ? (Status == FindingStatus.Confirmed ? "Verified" : "Tentative") : "Firm";
 
     public string StatusText => Status switch
     {

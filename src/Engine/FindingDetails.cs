@@ -1,4 +1,5 @@
 using System.Text;
+using TryZ.Data;
 
 namespace TryZ.Engine;
 
@@ -11,6 +12,7 @@ internal sealed record FindingDetails
     public IReadOnlyList<string> Cves { get; init; } = Array.Empty<string>();
     public double? Cvss { get; init; }
     public string CvssVector { get; init; } = string.Empty;
+    public Confidence Confidence { get; init; } = Confidence.Firm;
 
     /// <summary>Rule id derived from a title, for checks that do not declare one: lower case, words joined by '-'.</summary>
     public static string Slug(string title)

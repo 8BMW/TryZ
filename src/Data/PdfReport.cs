@@ -42,7 +42,7 @@ internal static class PdfReport
                 layout.Line($"Target date: {i.DueText}{(i.Overdue ? " (overdue)" : string.Empty)} | {i.DueBasis}");
                 layout.Line($"Severity: {i.Severity}{(i.Kev ? " | Known exploited (CISA KEV)" + (i.Ransomware ? ", ransomware use" : string.Empty) : string.Empty)}"
                     + (i.Epss is double e ? $" | EPSS {e.ToString("P1", CultureInfo.InvariantCulture)}" : string.Empty));
-                layout.Line("Action: " + i.Action);
+                layout.Line((i.NeedsVerification ? "Verify first (tentative). " : string.Empty) + "Action: " + i.Action);
                 layout.Line("Affected: " + string.Join(", ", i.Endpoints));
                 if (i.Cves.Count > 0) layout.Line("CVEs: " + string.Join(", ", i.Cves));
             }
@@ -71,7 +71,7 @@ internal static class PdfReport
             foreach (var f in findings.OrderByDescending(f => f.Severity).ThenBy(f => f.Id))
             {
                 layout.Heading($"[{f.Severity}] {f.Title}");
-                layout.Line($"Host: {f.Host}:{f.Port}/{f.Proto} | Status: {f.StatusText} | CWE: {(f.Cwe > 0 ? f.CweText : "-")}");
+                layout.Line($"Host: {f.Host}:{f.Port}/{f.Proto} | Status: {f.StatusText} | Confidence: {f.ConfidenceText} | CWE: {(f.Cwe > 0 ? f.CweText : "-")}");
                 if (f.Cves.Count > 0) layout.Line($"CVEs: {string.Join(", ", f.Cves)}");
                 if (f.Cvss is double score) layout.Line($"CVSS: {score.ToString("0.0", CultureInfo.InvariantCulture)} {f.CvssVector}");
                 if (f.Threat is { } t) layout.Line($"KEV: {(t.Kev ? "Yes" : "No")}" + (t.Epss is double epss ? $" | EPSS: {epss.ToString("P2", CultureInfo.InvariantCulture)}" : ""));

@@ -69,7 +69,7 @@ internal static class TakeoverCheck
                             $"The DNS response contains an alias chain to {provider} ending in NXDOMAIN. This may be a dangling third-party resource, but DNS alone does not establish that it can be claimed or exploited.",
                             $"Resolver: {resolver}\nDNS result: NXDOMAIN\nCNAME chain: {string.Join(" -> ", chain)}",
                             "Verify the DNS record and provider resource ownership manually. Remove stale aliases or restore and secure the intended resource; do not claim resources without authorization.",
-                            new FindingDetails { RuleId = "potential-dangling-dns-alias", Proto = "dns" });
+                            new FindingDetails { RuleId = "potential-dangling-dns-alias", Proto = "dns", Confidence = Confidence.Tentative });
                     }
                     break;
                 }

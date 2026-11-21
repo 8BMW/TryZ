@@ -29,6 +29,8 @@ internal sealed class PlanItem
     public bool Ransomware { get; init; }
     public double? Epss { get; init; }
     public int Confirmed { get; init; }
+    /// <summary>Every finding behind the item is tentative and unconfirmed: check before anyone schedules downtime.</summary>
+    public bool NeedsVerification { get; init; }
 
     public string TierText => RemediationPlan.TierName(Tier);
     public string DueText => Due is DateOnly d ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "-";
@@ -127,7 +129,7 @@ internal sealed class RemediationPlan
             {
                 Rank = i + 1, Title = g.Title, Action = g.Action, Tier = g.Tier, Score = g.Score, Severity = g.Severity,
                 Findings = g.Findings, Endpoints = g.Endpoints, Hosts = g.Hosts, Cves = g.Cves, Due = g.Due, DueBasis = g.DueBasis,
-                Overdue = g.Overdue, Kev = g.Kev, Ransomware = g.Ransomware, Epss = g.Epss, Confirmed = g.Confirmed,
+                Overdue = g.Overdue, Kev = g.Kev, Ransomware = g.Ransomware, Epss = g.Epss, Confirmed = g.Confirmed, NeedsVerification = g.NeedsVerification,
             });
         }
         return new RemediationPlan(ranked, baseDate, now, open.Count, all.Count - open.Count);
@@ -179,6 +181,7 @@ internal sealed class RemediationPlan
             Ransomware = threats.Any(t => t.Kev && t.KevRansomware),
             Epss = threats.Select(t => t.Epss).Where(e => e is double v && double.IsFinite(v)).Max(),
             Confirmed = findings.Count(f => f.Status == FindingStatus.Confirmed),
+            NeedsVerification = findings.All(f => f.NeedsVerification),
         };
     }
 
@@ -202,13 +205,13 @@ internal sealed class RemediationPlan
     }
 
     public const string Disclaimer =
-        "Priority is an ordering aid built from severity, CISA KEV, FIRST EPSS and the host importance set in TryZ. "
+        "Priority is an ordering aid built from severity, detection confidence, CISA KEV, FIRST EPSS and the host importance set in TryZ. "
         + "Target dates start from the scan date; adjust them to your own policy. Verify each issue applies before changing production systems.";
 
     public string Csv()
     {
         var sb = new StringBuilder();
-        sb.Append("Rank,Priority,Score,Severity,Due,Due basis,Overdue,Issue,Action,Affected,Endpoints,CVEs,KEV,EPSS,Finding ids\r\n");
+        sb.Append("Rank,Priority,Score,Severity,Due,Due basis,Overdue,Verify first,Issue,Action,Affected,Endpoints,CVEs,KEV,EPSS,Finding ids\r\n");
         foreach (var i in Items)
         {
             sb.Append(i.Rank).Append(',')
@@ -218,6 +221,7 @@ internal sealed class RemediationPlan
               .Append(i.Due is DateOnly d ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : string.Empty).Append(',')
               .Append(ReportWriter.Csv(i.DueBasis)).Append(',')
               .Append(i.Overdue ? "yes" : "no").Append(',')
+              .Append(i.NeedsVerification ? "yes" : "no").Append(',')
               .Append(ReportWriter.Csv(i.Title)).Append(',')
               .Append(ReportWriter.Csv(i.Action)).Append(',')
               .Append(i.Endpoints.Count).Append(',')
@@ -241,7 +245,7 @@ internal sealed class RemediationPlan
         {
             rank = i.Rank, priority = i.TierText, score = Math.Round(i.Score), severity = i.Severity.ToString(), title = i.Title,
             action = i.Action, due = i.Due?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), dueBasis = i.DueBasis, overdue = i.Overdue,
-            endpoints = i.Endpoints, cves = i.Cves, kev = i.Kev, ransomware = i.Ransomware, epss = i.Epss, confirmed = i.Confirmed,
+            endpoints = i.Endpoints, cves = i.Cves, kev = i.Kev, verifyFirst = i.NeedsVerification, ransomware = i.Ransomware, epss = i.Epss, confirmed = i.Confirmed,
             findingIds = i.Findings.Select(f => f.Id).ToArray(),
         }).ToArray(),
     };

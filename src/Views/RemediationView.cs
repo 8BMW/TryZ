@@ -161,7 +161,7 @@ internal sealed class RemediationView : ModuleView
                 blocks.Add(($"Also applies to {others.Count} other endpoint(s): {string.Join(", ", others.Take(12))}{(others.Count > 12 ? $" and {others.Count - 12} more" : string.Empty)}", false, true));
             }
         }
-        blocks.Add(("Priority is a heuristic; local exposure and detection confidence are not scored. Set host importance above "
+        blocks.Add(("Priority is a heuristic; local exposure is not scored. Set host importance above "
             + "for systems that matter more or less to the business, and verify applicability before remediation.", false, false));
         blocks.Add(("Recommended action", true, false));
         blocks.Add((f.Remediation, false, false));

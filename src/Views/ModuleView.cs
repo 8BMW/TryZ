@@ -86,6 +86,7 @@ internal static class Schemas
         new Col<Finding>("Host", 104, f => f.Host) { Compare = (a, b) => IpKey(a.Host).CompareTo(IpKey(b.Host)), Mono = true },
         new Col<Finding>("Port", 46, f => f.Port.ToString()) { Compare = (a, b) => a.Port.CompareTo(b.Port), Align = HorizontalAlignment.Right, Mono = true },
         new Col<Finding>("CWE", 70, f => f.CweText) { Compare = (a, b) => a.Cwe.CompareTo(b.Cwe), Mono = true },
+        new Col<Finding>("Confidence", 76, f => f.ConfidenceText) { Color = f => f.NeedsVerification ? Theme.Brass : Theme.TextDim },
         new Col<Finding>("Status", 86, f => f.StatusText) { Color = f => f.Status switch
         {
             FindingStatus.Confirmed => Theme.Critical,

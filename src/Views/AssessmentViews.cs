@@ -592,12 +592,15 @@ internal sealed class VulnerabilityView : ModuleView
             _remedy.SetBlocks(new() { ("Select a finding to read the suggested remediation.", false, false) });
             return;
         }
-        _desc.SetBlocks(new()
+        var desc = new List<(string, bool, bool)>
         {
             (f.Title, true, false),
-            ($"{f.Severity}  |  {f.CweText}  |  {f.Host}:{f.Port}  |  {f.StatusText}", false, true),
+            ($"{f.Severity}  |  {f.CweText}  |  {f.Host}:{f.Port}  |  {f.StatusText}  |  {f.ConfidenceText}", false, true),
             (f.Description, false, false),
-        });
+        };
+        if (f.NeedsVerification)
+            desc.Add(("Tentative: this was inferred (for example from a version banner) rather than shown by a response. Verify it, then use Confirm.", false, false));
+        _desc.SetBlocks(desc);
         _evidence.Value = f.Evidence;
         _remedy.SetBlocks(new()
         {

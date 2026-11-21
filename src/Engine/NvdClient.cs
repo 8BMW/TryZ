@@ -173,7 +173,7 @@ internal static class NvdClient
                                     $"{m.Description}\n\nMatched by NVD configuration data for {target.Display} {version}. The version was taken from the service banner; distributions often backport fixes without changing the version string, and some CVEs only apply to specific modules or configurations, so verify before remediating.",
                                     evidence,
                                     $"Upgrade {target.Display} to a release that fixes {m.Id} (see vendor advisory and NVD references), or apply the distribution's security update.",
-                                    new FindingDetails { RuleId = m.Id.ToLowerInvariant(), Product = $"{target.Display} {version}", Cves = [m.Id], Cvss = m.Score, CvssVector = m.Vector }))
+                                    new FindingDetails { RuleId = m.Id.ToLowerInvariant(), Product = $"{target.Display} {version}", Cves = [m.Id], Cvss = m.Score, CvssVector = m.Vector, Confidence = Confidence.Tentative }))
                                 reported++;
                         }
                 }

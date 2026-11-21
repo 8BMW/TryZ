@@ -248,7 +248,7 @@ internal static class VulnRules
                 .Select(m => m.Value.ToUpperInvariant()).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             Add(sev, title, cwe,
                 $"Version banner indicates {product} {version}, which is in the affected range. {description}{_distroNote}{BannerCaveat}",
-                evidence, remediation, new FindingDetails { Product = $"{product} {version}", Proto = _svc.Proto, Cves = ids });
+                evidence, remediation, new FindingDetails { Product = $"{product} {version}", Proto = _svc.Proto, Cves = ids, Confidence = Confidence.Tentative });
         }
 
         /// <summary>Version reported by ServiceProbe when its product name contains <paramref name="word"/>.</summary>

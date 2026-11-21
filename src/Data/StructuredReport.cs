@@ -12,7 +12,7 @@ internal static class StructuredReport
     private static object FindingData(Finding f) => new
     {
         id = f.Id, ruleId = f.RuleId, severity = f.Severity.ToString(), title = f.Title, host = f.Host,
-        port = f.Port, protocol = f.Proto, cwe = f.Cwe > 0 ? f.CweText : null, status = f.StatusText,
+        port = f.Port, protocol = f.Proto, cwe = f.Cwe > 0 ? f.CweText : null, status = f.StatusText, confidence = f.ConfidenceText,
         f.Description, f.Evidence, f.Remediation, f.Product, cves = f.Cves, f.Cvss, f.CvssVector,
         threat = f.Threat == null ? null : new { f.Threat.Kev, f.Threat.KevCve, f.Threat.KevDateAdded, f.Threat.KevDueDate, f.Threat.KevRansomware, f.Threat.KevAction, f.Threat.Epss, f.Threat.EpssPercentile },
         fingerprint = f.Fingerprint,
@@ -61,7 +61,7 @@ internal static class StructuredReport
             message = new { text = f.Title },
             locations = string.IsNullOrWhiteSpace(f.Host) ? Array.Empty<object>() : new object[] { new { logicalLocations = new[] { new { name = f.Host, fullyQualifiedName = $"{f.Host}:{f.Port}/{f.Proto}", kind = "resource" } } } },
             partialFingerprints = new Dictionary<string, string> { ["tryz/v1"] = f.Fingerprint },
-            properties = new { tryzStatus = f.StatusText, severity = f.Severity.ToString(), f.Evidence, f.Remediation, f.Product, f.Cves, f.Cvss, f.CvssVector, f.Threat, f.Port, protocol = f.Proto },
+            properties = new { tryzStatus = f.StatusText, confidence = f.ConfidenceText, severity = f.Severity.ToString(), f.Evidence, f.Remediation, f.Product, f.Cves, f.Cvss, f.CvssVector, f.Threat, f.Port, protocol = f.Proto },
         }).ToArray();
         return JsonSerializer.Serialize(new Dictionary<string, object>
         {
@@ -119,7 +119,7 @@ internal static class StructuredReport
         foreach (var f in findings)
         {
             sb.Append("### ").Append(Md(f.Title)).AppendLine();
-            sb.Append("**Severity:** ").Append(f.Severity).Append("  \n**Host:** ").Append(Md(f.Host)).Append(':').Append(f.Port).Append('/').Append(Md(f.Proto)).Append("  \n**Status:** ").Append(Md(f.StatusText)).AppendLine();
+            sb.Append("**Severity:** ").Append(f.Severity).Append("  \n**Host:** ").Append(Md(f.Host)).Append(':').Append(f.Port).Append('/').Append(Md(f.Proto)).Append("  \n**Status:** ").Append(Md(f.StatusText)).Append("  \n**Confidence:** ").Append(Md(f.ConfidenceText)).AppendLine();
             if (f.Cwe > 0) sb.Append("**CWE:** ").Append(f.CweText).AppendLine();
             if (f.Cves.Count > 0) sb.Append("**CVEs:** ").AppendLine(Md(string.Join(", ", f.Cves)));
             if (f.Cvss is double score) sb.Append("**CVSS:** ").AppendLine(score.ToString("0.0", CultureInfo.InvariantCulture));
@@ -140,7 +140,7 @@ internal static class StructuredReport
         foreach (var i in plan.Items.Take(scope.PlanLimit))
         {
             string due = i.Overdue ? $"**{i.DueText} overdue**" : i.DueText;
-            string kev = i.Kev ? (i.Ransomware ? " (known exploited, ransomware)" : " (known exploited)") : string.Empty;
+            string kev = (i.Kev ? (i.Ransomware ? " (known exploited, ransomware)" : " (known exploited)") : string.Empty) + (i.NeedsVerification ? " (verify first)" : string.Empty);
             sb.Append("| ").Append(i.Rank).Append(" | ").Append(Md(i.TierText)).Append(' ').Append(i.Score.ToString("0", CultureInfo.InvariantCulture)).Append("/100 | ")
               .Append(due).Append(" | ").Append(Cell($"[{i.Severity}] {i.Title}{kev}")).Append(" | ").Append(Cell(i.AffectedText)).AppendLine(" |");
         }

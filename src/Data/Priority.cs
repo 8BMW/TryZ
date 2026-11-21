@@ -70,6 +70,19 @@ internal static class Prioritizer
         else if (threat is not null)
             reasons.Add("EPSS unavailable; no reduction was applied.");
 
+        if (f.Confidence == Confidence.Tentative)
+        {
+            if (f.Status == FindingStatus.Confirmed)
+                reasons.Add("Detected from indirect evidence, but confirmed by the analyst; no reduction applied.");
+            else if (threat?.Kev == true)
+                reasons.Add("Tentative (inferred, e.g. from a version banner) but known exploited: kept high. Verify before patching.");
+            else
+            {
+                score -= 10;
+                reasons.Add("Tentative: inferred, e.g. from a version banner that backports can make wrong (-10). Confirm it to remove this reduction.");
+            }
+        }
+
         switch (importance)
         {
             case AssetImportance.Critical:

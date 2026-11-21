@@ -166,7 +166,9 @@ internal static class ReportWriter
                     sb.Append("<div class=\"finding\" id=\"f").Append(f.Id).Append("\" style=\"border-left-color:").Append(SeverityColors[(int)f.Severity]).Append("\">\n");
                     sb.Append("<h3>").Append(Badge(f.Severity)).Append(' ').Append(H(f.Title)).Append("</h3>\n");
                     sb.Append("<div class=\"meta\">").Append(H(f.Host)).Append(f.Port > 0 ? ":" + f.Port.ToString(CultureInfo.InvariantCulture) : string.Empty)
-                      .Append(f.Cwe > 0 ? " &middot; " + H(f.CweText) : string.Empty).Append(" &middot; ").Append(H(f.StatusText)).Append("</div>\n");
+                      .Append(f.Cwe > 0 ? " &middot; " + H(f.CweText) : string.Empty).Append(" &middot; ").Append(H(f.StatusText))
+                      .Append(" &middot; confidence ").Append(H(f.ConfidenceText)).Append("</div>\n");
+                    if (f.NeedsVerification) sb.Append("<p class=\"meta\">Tentative: inferred from indirect evidence such as a version banner. Verify before remediation.</p>\n");
                     sb.Append("<p><strong>Description.</strong> ").Append(H(f.Description)).Append("</p>\n");
                     if (scope.Evidence && f.Evidence.Length > 0) sb.Append("<p><strong>Evidence</strong></p>\n<pre>").Append(H(f.Evidence)).Append("</pre>\n");
                     sb.Append("<p><strong>Remediation.</strong> ").Append(H(f.Remediation)).Append("</p>\n</div>\n");
@@ -207,6 +209,7 @@ internal static class ReportWriter
               .Append("<div class=\"act\">").Append(H(i.DueBasis)).Append("</div></td>");
             sb.Append("<td>").Append(Badge(i.Severity)).Append(' ').Append(H(i.Title));
             if (i.Kev) sb.Append(" <strong>&middot; known exploited").Append(i.Ransomware ? ", ransomware" : string.Empty).Append("</strong>");
+            if (i.NeedsVerification) sb.Append(" <em>&middot; verify first</em>");
             sb.Append("<div class=\"act\">").Append(H(i.Action)).Append("</div>");
             if (i.Cves.Count > 0) sb.Append("<div class=\"act\">").Append(H(string.Join(", ", i.Cves.Take(8)) + (i.Cves.Count > 8 ? $" +{i.Cves.Count - 8}" : string.Empty))).Append("</div>");
             sb.Append("</td><td class=\"mono\">").Append(string.Join("<br>", i.Endpoints.Take(6).Select(H)));
@@ -222,7 +225,7 @@ internal static class ReportWriter
     {
         scope ??= ReportScope.Complete;
         var sb = new StringBuilder();
-        sb.Append("Id,Severity,Title,Host,Port,CWE,Status,Description,Evidence,Remediation\r\n");
+        sb.Append("Id,Severity,Title,Host,Port,CWE,Status,Confidence,Description,Evidence,Remediation\r\n");
         foreach (var f in scope.SelectFindings(s).OrderByDescending(f => f.Severity).ThenBy(f => f.Id))
         {
             sb.Append(f.Id).Append(',')
@@ -232,6 +235,7 @@ internal static class ReportWriter
               .Append(f.Port).Append(',')
               .Append(f.Cwe > 0 ? f.CweText : string.Empty).Append(',')
               .Append(Csv(f.StatusText)).Append(',')
+              .Append(Csv(f.ConfidenceText)).Append(',')
               .Append(Csv(f.Description)).Append(',')
               .Append(Csv(scope.Evidence ? f.Evidence : string.Empty)).Append(',')
               .Append(Csv(f.Remediation)).Append("\r\n");

@@ -269,6 +269,7 @@ internal sealed class ScanContext : IDisposable
             Cves = details?.Cves ?? Array.Empty<string>(),
             Cvss = details?.Cvss,
             CvssVector = details?.CvssVector ?? string.Empty,
+            Confidence = details?.Confidence ?? Confidence.Firm,
         };
         _findings.Enqueue(f);
         Emit(new FindingFound(f));

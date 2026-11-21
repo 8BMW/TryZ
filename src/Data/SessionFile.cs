@@ -117,6 +117,8 @@ internal sealed class FindingDto
     public double? Cvss { get; set; }
     public string CvssVector { get; set; } = string.Empty;
     public ThreatDto? Threat { get; set; }
+    /// <summary>Null in files saved before confidence existed; inferred on load.</summary>
+    public Confidence? Confidence { get; set; }
 }
 
 internal sealed class ThreatDto

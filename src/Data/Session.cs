@@ -256,6 +256,7 @@ internal sealed class Session
             Description = f.Description, Evidence = f.Evidence, Remediation = f.Remediation, Status = f.Status,
             RuleId = f.RuleId, Proto = f.Proto, Product = f.Product, Cves = f.Cves.ToList(), Cvss = f.Cvss, CvssVector = f.CvssVector,
             Threat = f.Threat is { } t ? ThreatDto.From(t) : null,
+            Confidence = f.Confidence,
         }).ToList(),
         Urls = Urls.Items.Select(u => new UrlDto
         {
@@ -345,6 +346,7 @@ internal sealed class Session
                 Cvss = f.Cvss is >= 0 and <= 10 ? f.Cvss : null,
                 CvssVector = f.CvssVector ?? string.Empty,
                 Threat = f.Threat?.ToInfo(),
+                Confidence = f.Confidence is Confidence c && Enum.IsDefined(c) ? c : InferConfidence(f),
             };
             Findings.Add(finding);
             _findingsById[finding.Id] = finding;
@@ -376,6 +378,11 @@ internal sealed class Session
         }
         Dirty = true;
     }
+
+    // Older files: version-banner and NVD matches carry CVEs or say so in the description; the DNS alias check is a lead by design.
+    private static Confidence InferConfidence(FindingDto f) =>
+        (f.Cves?.Count ?? 0) > 0 || f.RuleId == "potential-dangling-dns-alias" || (f.Description ?? string.Empty).Contains("Version banner indicates", StringComparison.Ordinal)
+            ? Confidence.Tentative : Confidence.Firm;
 
     public void CancelOpenTasks()
     {
