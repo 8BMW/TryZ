@@ -662,6 +662,7 @@ internal static partial class Crawler
             if (r == null) return links;
             Record(r);
             if (r.Location != null) links.Add(r.Location);
+            NoteQueryInjectionPoint(url);
 
             string path = url.AbsolutePath;
             bool isHtml = r.MediaType.Contains("html", StringComparison.Ordinal);
@@ -777,7 +778,57 @@ internal static partial class Crawler
                     Collect(Kind.PasswordAutocomplete, url.AbsoluteUri);
                 if (f.Method == "post" && !f.HasCsrfToken && !metaToken)
                     Collect(Kind.MissingCsrf, $"{url.AbsoluteUri} -> POST {target.AbsoluteUri}");
+                NoteFormInjectionPoint(target, f);
             }
+        }
+
+        /// <summary>Record a fetched URL that carries a query string as a GET injection point for the active audit.</summary>
+        private void NoteQueryInjectionPoint(Uri url)
+        {
+            if (!_ctx.Options.RunActiveChecks || url.Query.Length <= 1) return;
+            var pars = ParseQuery(url.Query);
+            if (pars.Count == 0) return;
+            _ctx.NoteInjectionPoint(new InjectionPoint
+            {
+                Method = "GET",
+                Url = new Uri(url.GetLeftPart(UriPartial.Path)),
+                HostIp = _rootIp,
+                Port = _root.Port,
+                Parameters = pars,
+                Origin = "query string",
+            });
+        }
+
+        /// <summary>Record an HTML form (GET or POST) with its submittable fields as an injection point.</summary>
+        private void NoteFormInjectionPoint(Uri action, HtmlForm f)
+        {
+            if (!_ctx.Options.RunActiveChecks || f.Fields.Count == 0) return;
+            if (action.Scheme != Uri.UriSchemeHttp && action.Scheme != Uri.UriSchemeHttps) return;
+            if (!SameOrigin(action, _root)) return;
+            var fields = f.Fields.Where(kv => kv.Key.Length > 0).ToList();
+            if (fields.Count == 0) return;
+            _ctx.NoteInjectionPoint(new InjectionPoint
+            {
+                Method = f.Method == "post" ? "POST" : "GET",
+                Url = new Uri(action.GetLeftPart(UriPartial.Path)),
+                HostIp = _rootIp,
+                Port = _root.Port,
+                Parameters = fields,
+                Origin = f.HasPassword ? "login form" : "HTML form",
+            });
+        }
+
+        private static List<KeyValuePair<string, string>> ParseQuery(string query)
+        {
+            var list = new List<KeyValuePair<string, string>>();
+            foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = part.IndexOf('=');
+                string name = Uri.UnescapeDataString((eq >= 0 ? part[..eq] : part).Replace('+', ' '));
+                string val = eq >= 0 ? Uri.UnescapeDataString(part[(eq + 1)..].Replace('+', ' ')) : string.Empty;
+                if (name.Length > 0) list.Add(new(name, val));
+            }
+            return list;
         }
 
         private static bool LooksLikeDotNetTrace(string body, int at)

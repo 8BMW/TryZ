@@ -47,6 +47,25 @@ internal sealed class AppSettings
     public string LastCompareBaseline { get; set; } = string.Empty;
     public string UserAgent { get; set; } = "TryZ-Scanner/1.0 (+authorized security assessment)";
 
+    // Authenticated scanning
+    public string SessionCookie { get; set; } = string.Empty;
+    public List<string> ExtraHeaders { get; set; } = new();
+    public string AuthorizationHeader { get; set; } = string.Empty;
+    public string BasicUser { get; set; } = string.Empty;
+    public string BasicPassword { get; set; } = string.Empty;
+
+    // Upstream proxy (Burp / ZAP)
+    public string HttpProxy { get; set; } = string.Empty;
+
+    // Active (intrusive) testing
+    public bool RunActiveChecks { get; set; }
+    public int MaxActiveTargets { get; set; } = 400;
+
+    // Content & subdomain discovery
+    public bool RunContentDiscovery { get; set; }
+    public bool RunSubdomainScan { get; set; }
+    public string WordlistPath { get; set; } = string.Empty;
+
     private static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TryZ", "settings.json");
 
@@ -65,6 +84,13 @@ internal sealed class AppSettings
                 loaded.UserAgent ??= string.Empty;
                 loaded.RulesDirectory ??= string.Empty;
                 loaded.LastCompareBaseline ??= string.Empty;
+                loaded.SessionCookie ??= string.Empty;
+                loaded.ExtraHeaders ??= new();
+                loaded.AuthorizationHeader ??= string.Empty;
+                loaded.BasicUser ??= string.Empty;
+                loaded.BasicPassword ??= string.Empty;
+                loaded.HttpProxy ??= string.Empty;
+                loaded.WordlistPath ??= string.Empty;
                 return loaded;
             }
         }

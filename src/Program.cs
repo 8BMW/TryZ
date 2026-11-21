@@ -17,6 +17,9 @@ internal static class Program
             var capture = TryZ.Capture.CaptureOptions.Parse(args);
             if (capture != null) return TryZ.Capture.CaptureRunner.Run(capture);
 #endif
+            // Headless command-line scan (automation / CI): no GUI, writes reports to disk.
+            if (TryZ.Shell.HeadlessRunner.IsHeadless(args)) return TryZ.Shell.HeadlessRunner.Run(args);
+
             var settings = AppSettings.Load();
             if (settings.ShowSplash)
             {

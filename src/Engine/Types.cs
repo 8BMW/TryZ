@@ -59,3 +59,32 @@ internal sealed class OpenService
 
     public string Scheme => Tls ? "https" : "http";
 }
+
+/// <summary>
+/// A parameterised request the crawler found and the active audit can fuzz: either a GET URL carrying a query string,
+/// or an HTML form (GET or POST) with its action and field names. Values captured are only samples to echo back.
+/// </summary>
+internal sealed class InjectionPoint
+{
+    /// <summary>"GET" or "POST".</summary>
+    public required string Method { get; init; }
+    /// <summary>Absolute request URL (for GET, without the query; for POST, the form action).</summary>
+    public required Uri Url { get; init; }
+    /// <summary>Host IP the request is pinned to, for finding attribution.</summary>
+    public required string HostIp { get; init; }
+    public required int Port { get; init; }
+    /// <summary>Parameter name → sample value, in discovery order.</summary>
+    public required IReadOnlyList<KeyValuePair<string, string>> Parameters { get; init; }
+    /// <summary>Where it came from, e.g. "query string" or "login form", used in evidence text.</summary>
+    public string Origin { get; init; } = "query string";
+
+    /// <summary>De-dup key: method + path + sorted parameter names (values ignored).</summary>
+    public string Signature
+    {
+        get
+        {
+            var names = Parameters.Select(p => p.Key).OrderBy(n => n, StringComparer.Ordinal);
+            return $"{Method} {Url.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped)}?{string.Join('&', names)}";
+        }
+    }
+}

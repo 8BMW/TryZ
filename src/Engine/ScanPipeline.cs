@@ -126,6 +126,21 @@ internal static class ScanPipeline
 
         // ---------------------------------------------------------------- 4. crawl
         ctx.ResetPhase(ScanContext.PhaseCrawl);
+        // Dictionary content discovery runs before the crawl so that anything it finds is crawled for further links.
+        if (o.RunContentDiscovery && webRoots.Count > 0)
+        {
+            int task = ctx.AddTask("Content discovery", "Web Crawler");
+            ctx.UpdateTask(task, TaskState.Running, 0);
+            await ContentDiscovery.RunContentAsync(ctx, webRoots.Distinct().ToList(), task).ConfigureAwait(false);
+            ctx.UpdateTask(task, TaskState.Done, 100);
+        }
+        if (o.RunSubdomainScan)
+        {
+            int task = ctx.AddTask("Sub-domain enumeration", "Web Crawler");
+            ctx.UpdateTask(task, TaskState.Running, 0);
+            await ContentDiscovery.RunSubdomainsAsync(ctx, task).ConfigureAwait(false);
+            ctx.UpdateTask(task, TaskState.Done, 100);
+        }
         if (o.RunCrawler && webRoots.Count > 0)
             await Crawler.RunAsync(ctx, webRoots.Distinct().ToList()).ConfigureAwait(false);
         else
@@ -135,6 +150,15 @@ internal static class ScanPipeline
             int task = ctx.AddTask("Dangling DNS check", "Web Crawler");
             ctx.UpdateTask(task, TaskState.Running, 0);
             await TakeoverCheck.RunAsync(ctx, task).ConfigureAwait(false);
+            ctx.UpdateTask(task, TaskState.Done, 100);
+        }
+
+        // Active (intrusive) testing of the parameters the crawl collected: reflected XSS, SQLi, traversal, open redirect.
+        if (o.RunActiveChecks)
+        {
+            int task = ctx.AddTask("Active injection testing", "Web Crawler");
+            ctx.UpdateTask(task, TaskState.Running, 0);
+            await ActiveAudit.RunAsync(ctx, task).ConfigureAwait(false);
             ctx.UpdateTask(task, TaskState.Done, 100);
         }
         ctx.SetPhase(ScanContext.PhaseCrawl, 1);

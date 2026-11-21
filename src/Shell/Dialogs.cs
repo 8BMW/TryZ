@@ -381,6 +381,19 @@ internal sealed class OptionsDialog : SkinDialog
     private TextField _rulesDir = null!;
     private SkinList _authorizedList = null!;
     private TextField _footer = null!;
+    // Authenticated scanning
+    private TextField _cookie = null!;
+    private TextField _authHeader = null!;
+    private TextField _basicUser = null!;
+    private TextField _basicPass = null!;
+    private TextField _extraHeader = null!;
+    private TextField _proxy = null!;
+    // Active testing
+    private SkinCheck _active = null!;
+    private SkinSpin _activeMax = null!;
+    private SkinCheck _discover = null!;
+    private SkinCheck _subdomains = null!;
+    private TextField _wordlist = null!;
 
     public OptionsDialog(AppSettings settings) : base("Options", 660, 500)
     {
@@ -397,6 +410,8 @@ internal sealed class OptionsDialog : SkinDialog
         AddPage(scan, "Authorized Targets", BuildAuthorized());
         var engine = AddPage(null, "Engine", BuildEngine());
         AddPage(engine, "Web Crawler", BuildCrawler());
+        AddPage(engine, "Authentication", BuildAuth());
+        AddPage(engine, "Active Testing", BuildActive());
         AddPage(engine, "UDP Services", BuildUdp());
         AddPage(engine, "Threat Intelligence", BuildIntel());
         AddPage(engine, "Detection Rules", BuildRules());
@@ -605,6 +620,49 @@ internal sealed class OptionsDialog : SkinDialog
         return Stack(g, http, dns);
     }
 
+    private Control BuildAuth()
+    {
+        var cred = new EtchedGroup("Authenticated Scanning");
+        cred.LabelWidth = 95;
+        _cookie = cred.Add("Cookie", new TextField(cue: "session=...; other=...") { Mono = true });
+        _cookie.Value = _settings.SessionCookie ?? string.Empty;
+        _authHeader = cred.Add("Authorization", new TextField(cue: "e.g. Bearer eyJ... or Basic dXNlcjpwYXNz") { Mono = true });
+        _authHeader.Value = _settings.AuthorizationHeader ?? string.Empty;
+        _basicUser = cred.Add("Basic user", new TextField(cue: "Optional HTTP Basic user"));
+        _basicUser.Value = _settings.BasicUser ?? string.Empty;
+        _basicPass = cred.Add("Basic password", new TextField(cue: "Optional HTTP Basic password"));
+        _basicPass.Value = _settings.BasicPassword ?? string.Empty;
+        _basicPass.Edit.UseSystemPasswordChar = true;
+        _extraHeader = cred.Add("Extra header", new TextField(cue: "One header, e.g. X-Api-Key: abc123") { Mono = true });
+        _extraHeader.Value = (_settings.ExtraHeaders is { Count: > 0 } h) ? h[0] : string.Empty;
+        cred.Add(null, Note("These are sent with every HTTP request so the crawler and checks reach pages behind a login. Use the --header option for more than one extra header. Credentials are stored in settings.json in your profile."), height: 58);
+
+        var proxy = new EtchedGroup("Upstream Proxy");
+        proxy.LabelWidth = 95;
+        _proxy = proxy.Add("Proxy URL", new TextField(cue: "e.g. http://127.0.0.1:8080 (Burp / ZAP)") { Mono = true });
+        _proxy.Value = _settings.HttpProxy ?? string.Empty;
+        proxy.Add(null, Note("When set, every HTTP(S) request is routed through this proxy instead of connecting directly, so the proxy enforces host pinning and the exclusion list. Leave empty for direct connections."), height: 44);
+        return Stack(cred, proxy);
+    }
+
+    private Control BuildActive()
+    {
+        var g = new EtchedGroup("Active Injection Testing");
+        _active = g.Add(null, new SkinCheck("Send active payloads to discovered parameters (intrusive)", _settings.RunActiveChecks), height: 17);
+        g.LabelWidth = 130;
+        _activeMax = g.Add("Max parameters", new SkinSpin(Math.Clamp(_settings.MaxActiveTargets, 1, 5000), 1, 5000, 50), width: 90);
+        g.Add(null, Note("Tests each crawled parameter for reflected XSS, SQL injection, path traversal and open redirect, with a per-request baseline to limit false positives. Payloads are non-destructive. Runs only on the Full and Custom profiles and only against authorized targets."), height: 58);
+
+        var disc = new EtchedGroup("Content & Name Discovery");
+        _discover = disc.Add(null, new SkinCheck("Dictionary discovery of unlinked paths (admin, backups, .git, API)", _settings.RunContentDiscovery), height: 17);
+        _subdomains = disc.Add(null, new SkinCheck("DNS enumeration of common sub-domains (resolve only)", _settings.RunSubdomainScan), height: 17);
+        disc.LabelWidth = 95;
+        _wordlist = disc.Add("Word list", new TextField(cue: "Optional extra word-list file, one path per line") { Mono = true });
+        _wordlist.Value = _settings.WordlistPath ?? string.Empty;
+        disc.Add(null, Note("Discovery probes a built-in list plus your file and filters catch-all pages with a soft-404 baseline. Sub-domain enumeration only resolves names; it never scans a host that is not in scope."), height: 44);
+        return Stack(g, disc);
+    }
+
     private Control BuildUdp()
     {
         var g = new EtchedGroup("UDP Service Probes");
@@ -694,6 +752,18 @@ internal sealed class OptionsDialog : SkinDialog
         _settings.UseCustomRules = _customRules.Checked;
         _settings.RulesDirectory = _rulesDir.Value.Trim();
         _settings.ReportAuthorLine = _footer.Value;
+        _settings.SessionCookie = _cookie.Value.Trim();
+        _settings.AuthorizationHeader = _authHeader.Value.Trim();
+        _settings.BasicUser = _basicUser.Value.Trim();
+        _settings.BasicPassword = _basicPass.Value;
+        string extra = _extraHeader.Value.Trim();
+        _settings.ExtraHeaders = extra.Contains(':') ? new List<string> { extra } : new List<string>();
+        _settings.HttpProxy = _proxy.Value.Trim();
+        _settings.RunActiveChecks = _active.Checked;
+        _settings.MaxActiveTargets = _activeMax.Value;
+        _settings.RunContentDiscovery = _discover.Checked;
+        _settings.RunSubdomainScan = _subdomains.Checked;
+        _settings.WordlistPath = _wordlist.Value.Trim();
         _settings.Save();
         return true;
     }

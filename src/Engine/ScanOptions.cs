@@ -39,6 +39,35 @@ internal sealed class ScanOptions
     public string RulesDirectory { get; init; } = string.Empty;
     public string UserAgent { get; init; } = "TryZ-Scanner/1.0 (+authorized security assessment)";
 
+    // ---- authenticated scanning -------------------------------------------------------------
+    /// <summary>Cookie header sent with every HTTP request (e.g. "session=abc; csrf=def"), for scanning behind a login.</summary>
+    public string SessionCookie { get; init; } = string.Empty;
+    /// <summary>Extra request headers as "Name: value" lines, sent with every HTTP request.</summary>
+    public IReadOnlyList<string> ExtraHeaders { get; init; } = Array.Empty<string>();
+    /// <summary>Optional Authorization header value, e.g. "Bearer eyJ..." or "Basic dXNlcjpwYXNz".</summary>
+    public string AuthorizationHeader { get; init; } = string.Empty;
+    /// <summary>When set with <see cref="BasicPassword"/>, adds an HTTP Basic Authorization header.</summary>
+    public string BasicUser { get; init; } = string.Empty;
+    public string BasicPassword { get; init; } = string.Empty;
+
+    // ---- upstream proxy (Burp / ZAP / corporate) --------------------------------------------
+    /// <summary>Route all HTTP(S) requests through this proxy, e.g. "http://127.0.0.1:8080". Empty = direct.</summary>
+    public string HttpProxy { get; init; } = string.Empty;
+
+    // ---- active (intrusive) web testing -----------------------------------------------------
+    /// <summary>Run active injection checks (reflected XSS, SQLi, path traversal, open redirect) on discovered parameters.</summary>
+    public bool RunActiveChecks { get; init; }
+    /// <summary>Hard cap on the number of parameters actively fuzzed, to bound request volume.</summary>
+    public int MaxActiveTargets { get; init; } = 400;
+
+    // ---- content & name discovery -----------------------------------------------------------
+    /// <summary>Dictionary-based discovery of unlinked paths (admin panels, backups, API roots).</summary>
+    public bool RunContentDiscovery { get; init; }
+    /// <summary>DNS enumeration of common sub-domains of in-scope names (feeds the crawl and takeover check).</summary>
+    public bool RunSubdomainScan { get; init; }
+    /// <summary>Optional file of extra wordlist entries for content discovery, one per line.</summary>
+    public string WordlistPath { get; init; } = string.Empty;
+
     public static ScanOptions From(AppSettings s, int profileIndex, int threads)
     {
         var custom = (PortSelection)Math.Clamp(s.CustomPortSelection, 0, 2);
@@ -81,5 +110,17 @@ internal sealed class ScanOptions
         UseCustomRules = s.UseCustomRules,
         RulesDirectory = string.IsNullOrWhiteSpace(s.RulesDirectory) ? DefaultRulesDirectory : s.RulesDirectory.Trim(),
         UserAgent = string.IsNullOrWhiteSpace(s.UserAgent) ? "TryZ-Scanner/1.0 (+authorized security assessment)" : s.UserAgent,
+        SessionCookie = s.SessionCookie?.Trim() ?? string.Empty,
+        ExtraHeaders = (s.ExtraHeaders ?? new()).Where(h => h.Contains(':')).ToArray(),
+        AuthorizationHeader = s.AuthorizationHeader?.Trim() ?? string.Empty,
+        BasicUser = s.BasicUser?.Trim() ?? string.Empty,
+        BasicPassword = s.BasicPassword ?? string.Empty,
+        HttpProxy = s.HttpProxy?.Trim() ?? string.Empty,
+        // Active checks are intrusive: only the Full and Custom profiles run them, and only when enabled in settings.
+        RunActiveChecks = s.RunActiveChecks && profile is 1 or 3,
+        MaxActiveTargets = Math.Clamp(s.MaxActiveTargets, 1, 5000),
+        RunContentDiscovery = s.RunContentDiscovery && profile != 0,
+        RunSubdomainScan = s.RunSubdomainScan,
+        WordlistPath = s.WordlistPath?.Trim() ?? string.Empty,
     };
 }

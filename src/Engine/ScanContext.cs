@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading.Channels;
 using TryZ.Data;
 
@@ -376,23 +377,142 @@ internal sealed class ScanContext : IDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
             MaxConnectionsPerServer = Math.Max(2, Math.Min(Options.Threads, 32)),
             UseCookies = false,
-            // Scanned host names connect to the discovered address (see PinHost); excluded addresses are refused.
-            ConnectCallback = ConnectPinnedAsync,
             SslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {
                 // Certificate problems are reported by TlsAudit; HTTP checks must still reach the content.
                 RemoteCertificateValidationCallback = static (_, _, _, _) => true,
             },
         };
+        // An upstream proxy (Burp/ZAP) terminates the connection itself, so host pinning and the exclusion list are
+        // enforced by the proxy operator, not here. Without a proxy, every connection is pinned to the discovered address.
+        var proxy = BuildProxy();
+        if (proxy != null)
+        {
+            handler.Proxy = proxy;
+            handler.UseProxy = true;
+        }
+        else
+        {
+            // Scanned host names connect to the discovered address (see PinHost); excluded addresses are refused.
+            handler.ConnectCallback = ConnectPinnedAsync;
+        }
         var client = new HttpClient(handler, disposeHandler: true)
         {
             Timeout = TimeSpan.FromMilliseconds(Options.ConnectTimeoutMs + Options.ReadTimeoutMs),
             MaxResponseContentBufferSize = 8 * 1024 * 1024,
         };
-        client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", Options.UserAgent);
-        client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "*/*");
+        var h = client.DefaultRequestHeaders;
+        h.TryAddWithoutValidation("User-Agent", Options.UserAgent);
+        h.TryAddWithoutValidation("Accept", "*/*");
+        // Authenticated scanning: a session cookie, custom headers and/or an Authorization header reach every request.
+        if (Options.SessionCookie.Length > 0) h.TryAddWithoutValidation("Cookie", Options.SessionCookie);
+        string auth = Options.AuthorizationHeader;
+        if (auth.Length == 0 && Options.BasicUser.Length > 0)
+            auth = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Options.BasicUser}:{Options.BasicPassword}"));
+        if (auth.Length > 0) h.TryAddWithoutValidation("Authorization", auth);
+        foreach (var line in Options.ExtraHeaders)
+        {
+            int c = line.IndexOf(':');
+            if (c <= 0) continue;
+            string name = line[..c].Trim();
+            string value = line[(c + 1)..].Trim();
+            if (name.Length > 0) h.TryAddWithoutValidation(name, value);
+        }
         return client;
     }
+
+    private IWebProxy? BuildProxy()
+    {
+        string p = Options.HttpProxy;
+        if (string.IsNullOrWhiteSpace(p)) return null;
+        if (!p.Contains("://", StringComparison.Ordinal)) p = "http://" + p;
+        return Uri.TryCreate(p, UriKind.Absolute, out var u) ? new WebProxy(u) { BypassProxyOnLocal = false } : null;
+    }
+
+    // ---------------------------------------------------------------- shared probe (active + discovery modules)
+
+    /// <summary>Result of a <see cref="ProbeAsync"/> request: a thin, allocation-light view used by the active checks.</summary>
+    public sealed class Probe
+    {
+        public required Uri Uri { get; init; }
+        public required int Status { get; init; }
+        public required string Body { get; init; }
+        public required IReadOnlyDictionary<string, string> Headers { get; init; }
+        public double LatencyMs { get; init; }
+        public string Header(string name) => Headers.TryGetValue(name, out var v) ? v : string.Empty;
+        public string ContentType => Header("Content-Type");
+        public bool IsHtml => ContentType.Contains("html", StringComparison.OrdinalIgnoreCase)
+                              || (ContentType.Length == 0 && Body.TrimStart().StartsWith('<'));
+    }
+
+    /// <summary>
+    /// Issues one rate-limited, cancellation-aware HTTP request through the shared pinned client and returns the
+    /// decoded response (body capped), or null on transport failure. Used by the active-audit and discovery modules so
+    /// they share pacing, pinning, auth and proxy settings with the passive checks.
+    /// </summary>
+    public async Task<Probe?> ProbeAsync(HttpMethod method, Uri uri, bool follow = false,
+        HttpContent? content = null, int maxBody = 256 * 1024)
+    {
+        await GateAsync().ConfigureAwait(false);
+        using var work = BeginWork();
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var req = new HttpRequestMessage(method, uri) { Content = content };
+            var client = follow ? _httpFollow : _http;
+            using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, Token).ConfigureAwait(false);
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var hh in resp.Headers.NonValidated) headers[hh.Key] = string.Join(", ", hh.Value);
+            foreach (var hh in resp.Content.Headers.NonValidated) headers[hh.Key] = string.Join(", ", hh.Value);
+            byte[] body = method == HttpMethod.Head ? Array.Empty<byte>() : await ReadLimitedAsync(resp.Content, maxBody).ConfigureAwait(false);
+            double ms = sw.Elapsed.TotalMilliseconds;
+            CountRequest(ms, (int)resp.StatusCode >= 500);
+            return new Probe { Uri = uri, Status = (int)resp.StatusCode, Body = Encoding.UTF8.GetString(body), Headers = headers, LatencyMs = ms };
+        }
+        catch (OperationCanceledException) when (Token.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or SocketException or InvalidOperationException)
+        {
+            CountRequest(sw.Elapsed.TotalMilliseconds, true);
+            return null;
+        }
+    }
+
+    private async Task<byte[]> ReadLimitedAsync(HttpContent content, int max)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(Token);
+        cts.CancelAfter(Options.ReadTimeoutMs);
+        using var ms = new MemoryStream();
+        try
+        {
+            await using var s = await content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+            byte[] buf = new byte[16 * 1024];
+            while (ms.Length < max)
+            {
+                int n = await s.ReadAsync(buf.AsMemory(0, (int)Math.Min(buf.Length, max - ms.Length)), cts.Token).ConfigureAwait(false);
+                if (n == 0) break;
+                ms.Write(buf, 0, n);
+            }
+        }
+        catch (OperationCanceledException) when (!Token.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is IOException or HttpRequestException) { }
+        return ms.ToArray();
+    }
+
+    // ---------------------------------------------------------------- injection points (fed by the crawler)
+
+    private readonly ConcurrentDictionary<string, InjectionPoint> _injectionPoints = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Records a parameterised request the crawler found (a URL with a query string, or an HTML form) as a candidate
+    /// for the active audit. De-duplicated by method, path and the set of parameter names so value-only variants collapse.
+    /// </summary>
+    public void NoteInjectionPoint(InjectionPoint point)
+    {
+        if (point.Parameters.Count == 0 || _injectionPoints.Count >= 20_000) return;
+        _injectionPoints.TryAdd(point.Signature, point);
+    }
+
+    public IReadOnlyCollection<InjectionPoint> InjectionPoints => _injectionPoints.Values.ToArray();
 
     private async ValueTask<Stream> ConnectPinnedAsync(SocketsHttpConnectionContext context, CancellationToken token)
     {

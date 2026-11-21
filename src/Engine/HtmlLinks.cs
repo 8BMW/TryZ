@@ -14,6 +14,8 @@ internal sealed class HtmlForm
     public bool PasswordAutocomplete { get; init; }
     /// <summary>True when a hidden input with a name that looks like an anti-CSRF token is present.</summary>
     public bool HasCsrfToken { get; init; }
+    /// <summary>Submittable fields (input/textarea/select) as name → default value, excluding file and submit inputs.</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> Fields { get; init; } = Array.Empty<KeyValuePair<string, string>>();
 }
 
 /// <summary>A tag reference the crawler cares about for mixed-content checks.</summary>
@@ -44,6 +46,12 @@ internal static partial class HtmlLinks
 
     [GeneratedRegex(@"<input\b(?<attrs>[^>]*)>", Opts, 2000)]
     private static partial Regex InputRegex();
+
+    [GeneratedRegex(@"<textarea\b(?<attrs>[^>]*)>", Opts, 2000)]
+    private static partial Regex TextAreaRegex();
+
+    [GeneratedRegex(@"<select\b(?<attrs>[^>]*)>", Opts, 2000)]
+    private static partial Regex SelectRegex();
 
     /// <summary>String literals in JS that look like site paths: start with a single '/', no whitespace or quotes inside.</summary>
     [GeneratedRegex(@"(?<q>[""'`])(?<p>/(?!/)[A-Za-z0-9_\-.~%!$&+,;=:@/]*[A-Za-z0-9_\-~%/](?:\?[A-Za-z0-9_\-.~%!$&+,;=:@/?]*)?)\k<q>", RegexOptions.CultureInvariant, 2000)]
@@ -189,22 +197,34 @@ internal static partial class HtmlLinks
             var fa = ParseAttributes(f.Groups["attrs"].Value);
             bool formAcOff = fa.TryGetValue("autocomplete", out var fac) && IsAutocompleteOff(fac);
             bool hasPassword = false, passwordAc = false, token = false;
+            var fields = new List<KeyValuePair<string, string>>();
             foreach (Match i in InputRegex().Matches(f.Groups["body"].Value))
             {
                 var ia = ParseAttributes(i.Groups["attrs"].Value);
                 string type = ia.TryGetValue("type", out var t) ? t.Trim().ToLowerInvariant() : "text";
+                ia.TryGetValue("name", out var fname);
+                ia.TryGetValue("value", out var fval);
                 if (type == "password")
                 {
                     hasPassword = true;
                     bool off = ia.TryGetValue("autocomplete", out var iac) ? IsAutocompleteOff(iac) : formAcOff;
                     if (!off) passwordAc = true;
                 }
-                else if (type == "hidden" && ia.TryGetValue("name", out var n) && LooksLikeCsrfName(n)
-                    && ia.TryGetValue("value", out var v) && v.Length >= 8)
+                else if (type == "hidden" && fname != null && LooksLikeCsrfName(fname) && fval is { Length: >= 8 })
                 {
                     token = true;
                 }
+                // Collect submittable fields for active fuzzing; skip valueless submit/button/file/image inputs.
+                if (!string.IsNullOrEmpty(fname) && type is not ("submit" or "button" or "reset" or "file" or "image"))
+                    fields.Add(new(fname!, fval ?? string.Empty));
             }
+            // <textarea name=...> and <select name=...> are submittable too.
+            foreach (Match ta in TextAreaRegex().Matches(f.Groups["body"].Value))
+                if (ParseAttributes(ta.Groups["attrs"].Value).TryGetValue("name", out var tn) && tn.Length > 0)
+                    fields.Add(new(tn, string.Empty));
+            foreach (Match se in SelectRegex().Matches(f.Groups["body"].Value))
+                if (ParseAttributes(se.Groups["attrs"].Value).TryGetValue("name", out var sn) && sn.Length > 0)
+                    fields.Add(new(sn, string.Empty));
             forms.Add(new HtmlForm
             {
                 Action = fa.TryGetValue("action", out var a) ? a.Trim() : string.Empty,
@@ -212,6 +232,7 @@ internal static partial class HtmlLinks
                 HasPassword = hasPassword,
                 PasswordAutocomplete = passwordAc,
                 HasCsrfToken = token,
+                Fields = fields,
             });
         }
         return forms;
