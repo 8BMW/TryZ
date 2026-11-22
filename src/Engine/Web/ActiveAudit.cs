@@ -7,10 +7,12 @@ namespace TryZ.Engine;
 
 /// <summary>
 /// Active (intrusive) web testing of the parameterised requests the crawler collected: reflected XSS, error- and
-/// boolean-based SQL injection, path traversal / local file inclusion, and open redirect. Each parameter is tested in
-/// isolation against a per-request baseline so that only a change caused by the injected payload is reported, which
-/// keeps false positives low. All requests are same-origin, rate-limited, pinned and cancellation-aware; no payload is
-/// destructive (no DROP/DELETE/time-delay/stored content), and every finding records the exact parameter and payload.
+/// boolean-based SQL injection, path traversal / local file inclusion, open redirect, server-side template injection,
+/// OS command injection (time-based), server-side request forgery, and the per-URL CORS and XXE checks. Each parameter
+/// is tested against every class against a per-request baseline so only a change caused by the injected payload is
+/// reported, which keeps false positives low. All requests are same-origin (except the deliberate out-of-scope canary
+/// hosts used by the redirect/SSRF/CORS probes), rate-limited, pinned and cancellation-aware; command-injection payloads
+/// use only benign delays (sleep/ping), and every finding records the exact parameter and payload.
 /// </summary>
 internal static partial class ActiveAudit
 {
@@ -31,7 +33,7 @@ internal static partial class ActiveAudit
         }
         int paramCount = points.Sum(p => p.Parameters.Count);
         ctx.Log(LogLevel.Notice, Src,
-            $"Active testing started on {points.Count} request(s), {paramCount} parameter(s): reflected XSS, SQL injection, path traversal, open redirect");
+            $"Active testing started on {points.Count} request(s), {paramCount} parameter(s): reflected XSS, SQL injection, path traversal, open redirect, template injection, command injection, SSRF, CORS and XXE");
 
         int done = 0;
         await Parallel.ForEachAsync(points,
@@ -58,15 +60,24 @@ internal static partial class ActiveAudit
         var baseline = await SendAsync(ctx, point, point.Parameters).ConfigureAwait(false);
         if (baseline == null) return;
 
+        // URL-level checks that do not depend on a single parameter run once per injection point.
+        await CorsAsync(ctx, point).ConfigureAwait(false);
+        await XxeAsync(ctx, point).ConfigureAwait(false);
+
         foreach (var param in point.Parameters)
         {
             ctx.Token.ThrowIfCancellationRequested();
             string name = param.Key;
-            // Each family short-circuits on the first confirmed hit for this parameter.
-            if (await ReflectedXssAsync(ctx, point, name).ConfigureAwait(false)) continue;
-            if (await SqlInjectionAsync(ctx, point, name, param.Value, baseline).ConfigureAwait(false)) continue;
-            if (await PathTraversalAsync(ctx, point, name).ConfigureAwait(false)) continue;
+            // Every parameter is tested against every vulnerability class; a class that confirms a hit does not stop the
+            // others, so a parameter that is both reflected and injectable is reported for each. Each class still
+            // short-circuits internally on its own first confirmed payload to bound request volume.
+            await ReflectedXssAsync(ctx, point, name).ConfigureAwait(false);
+            await SqlInjectionAsync(ctx, point, name, param.Value, baseline).ConfigureAwait(false);
+            await PathTraversalAsync(ctx, point, name).ConfigureAwait(false);
             await OpenRedirectAsync(ctx, point, name, param.Value).ConfigureAwait(false);
+            await TemplateInjectionAsync(ctx, point, name).ConfigureAwait(false);
+            await CommandInjectionAsync(ctx, point, name, param.Value, baseline).ConfigureAwait(false);
+            await SsrfAsync(ctx, point, name, param.Value).ConfigureAwait(false);
         }
     }
 

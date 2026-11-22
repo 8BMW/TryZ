@@ -564,6 +564,9 @@ internal static partial class Crawler
                 sw.Stop();
                 _ctx.CountRequest(headerMs, status >= 500);
                 Interlocked.Add(ref _bytes, read);
+                // Form login: if the session dropped mid-crawl, re-authenticate so later pages are fetched logged in.
+                if (_ctx.FormLoginEnabled && _ctx.LooksLoggedOut(status, location?.AbsoluteUri ?? string.Empty, body ?? string.Empty))
+                    await _ctx.EnsureSessionAsync(status, location?.AbsoluteUri ?? string.Empty, body ?? string.Empty).ConfigureAwait(false);
                 return new FetchResult
                 {
                     Url = url,

@@ -124,13 +124,15 @@ internal sealed class Session
 
     public void AddLog(LogLevel level, string source, string text)
     {
+        string timeText = (StartedAt ?? DateTime.Now).AddSeconds(ElapsedSeconds).ToString("HH:mm:ss.fff");
         Log.Add(new LogEntry
         {
-            TimeText = (StartedAt ?? DateTime.Now).AddSeconds(ElapsedSeconds).ToString("HH:mm:ss.fff"),
+            TimeText = timeText,
             Level = level,
             Source = source,
             Text = text,
         });
+        FileLog.Write(timeText, level, source, text);
         Dirty = true;
     }
 

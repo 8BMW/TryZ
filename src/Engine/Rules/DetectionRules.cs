@@ -113,7 +113,7 @@ internal static class DetectionRules
     {
         if (!Sets.TryGetValue(ctx, out var set) || set.Rules.Count == 0) return;
         Uri origin;
-        try { origin = new UriBuilder(svc.Scheme, svc.Host.Hostname.Length > 0 ? svc.Host.Hostname : svc.Host.Ip, svc.Port).Uri; }
+        try { origin = new UriBuilder(svc.Scheme, svc.Host.UrlHost, svc.Port).Uri; }
         catch (UriFormatException ex) { ctx.Log(LogLevel.Warn, "rules", $"Invalid target URL: {ex.Message}"); return; }
         foreach (var rule in set.Rules)
         {

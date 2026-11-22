@@ -2,7 +2,7 @@ using TryZ.Data;
 
 namespace TryZ.Views;
 
-internal enum ExportFormat { Html, Csv, Json, Sarif, Pdf, Markdown }
+internal enum ExportFormat { Html, Csv, Json, Sarif, Pdf, Markdown, Plan }
 
 internal interface IShell
 {

@@ -260,10 +260,12 @@ internal sealed class MainForm : FrameForm, IShell
         MenuItem(reportsMenu, "&Export HTML Report...", IconId.Export, () => ExportReport(ExportFormat.Html), Keys.Control | Keys.Shift | Keys.E);
         MenuItem(reportsMenu, "Export &PDF Report...", IconId.Export, () => ExportReport(ExportFormat.Pdf));
         MenuItem(reportsMenu, "Export &Markdown Report...", IconId.Export, () => ExportReport(ExportFormat.Markdown));
+        MenuItem(reportsMenu, "Export Remediation &Plan...", IconId.Export, () => ExportReport(ExportFormat.Plan));
         reportsMenu.DropDownItems.Add(new ToolStripSeparator());
         MenuItem(reportsMenu, "Export Findings &CSV...", IconId.Export, () => ExportReport(ExportFormat.Csv));
         MenuItem(reportsMenu, "Export Findings &JSON...", IconId.Export, () => ExportReport(ExportFormat.Json));
         MenuItem(reportsMenu, "Export &SARIF 2.1.0...", IconId.Export, () => ExportReport(ExportFormat.Sarif));
+        MenuItem(reportsMenu, "Export &Activity Log...", IconId.Export, ExportActivityLog);
         reportsMenu.DropDownItems.Add(new ToolStripSeparator());
         MenuItem(reportsMenu, "&Remediation Plan", IconId.Remediation, () => NavigateTo(7));
         MenuItem(reportsMenu, "Compare with &Baseline...", IconId.Compare, () => NavigateTo(8), Keys.Control | Keys.B);
@@ -691,6 +693,40 @@ internal sealed class MainForm : FrameForm, IShell
         }
         _session.AddLog(LogLevel.Ok, "report", $"{info.Name} written to {path}");
         return true;
+    }
+
+    /// <summary>Writes the current activity log buffer to a text file the user chooses.</summary>
+    public void ExportActivityLog()
+    {
+        var items = _session.Log.Items;
+        if (items.Count == 0)
+        {
+            Notify("Export Activity Log", "The activity log is empty; run a scan first.", IconId.InfoMark);
+            return;
+        }
+        using var dlg = new SaveFileDialog
+        {
+            Title = "Export Activity Log",
+            Filter = "Log file (*.log)|*.log|Text file (*.txt)|*.txt",
+            DefaultExt = "log",
+            AddExtension = true,
+            OverwritePrompt = true,
+            FileName = $"tryz-log-{SafeName(_session.Target)}-{DateTime.Now:yyyyMMdd-HHmm}.log",
+        };
+        if (dlg.ShowDialog(this) != DialogResult.OK) return;
+        try
+        {
+            var sb = new StringBuilder(items.Count * 48);
+            sb.Append("TryZ activity log — target ").Append(_session.Target).Append(", ").Append(items.Count).AppendLine(" line(s)");
+            foreach (var l in items)
+                sb.Append(l.TimeText).Append("  ").Append(l.LevelName.PadRight(5)).Append("  ").Append(l.Source).Append(": ").AppendLine(l.Text);
+            File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(false));
+            _session.AddLog(LogLevel.Ok, "report", $"Activity log written to {dlg.FileName}");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Notify("Export Activity Log", $"The file could not be written: {ex.Message}", IconId.Warning);
+        }
     }
 
     private static string SafeName(string text)

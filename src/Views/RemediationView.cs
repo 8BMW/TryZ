@@ -71,7 +71,7 @@ internal sealed class RemediationView : ModuleView
     {
         if (_grid.SelectedItem is not Finding f)
         {
-            _detail.SetBlocks(new() { ("Select a finding to see its priority, reasons and recommended action.", false, false) });
+            ShowPlanOverview();
             return;
         }
         var priority = Prioritizer.Evaluate(f);
@@ -85,6 +85,32 @@ internal sealed class RemediationView : ModuleView
         blocks.Add(("Priority is a heuristic; asset importance, local exposure and confidence are not currently supplied. Verify applicability before remediation.", false, false));
         blocks.Add(("Recommended action", true, false));
         blocks.Add((f.Remediation, false, false));
+        _detail.SetBlocks(blocks);
+    }
+
+    /// <summary>Shown when no single finding is selected: the consolidated remediation plan across the visible findings.</summary>
+    private void ShowPlanOverview()
+    {
+        var plan = RemediationPlan.Build(Session.Findings.Items, _includeClosed.Checked);
+        if (plan.Actions.Count == 0)
+        {
+            _detail.SetBlocks(new() { ("Select a finding to see its priority, reasons and recommended action. No active findings to plan yet.", false, false) });
+            return;
+        }
+        var blocks = new List<(string, bool, bool)>
+        {
+            ("Remediation plan", true, false),
+            ($"{plan.Actions.Count} consolidated action(s) across {plan.FindingsCovered} finding(s)  |  " +
+             $"Fix now {plan.TierFindingCounts[(int)PriorityTier.FixNow]}  ·  Fix next {plan.TierFindingCounts[(int)PriorityTier.FixNext]}  ·  " +
+             $"Planned {plan.TierFindingCounts[(int)PriorityTier.Planned]}  ·  Monitor {plan.TierFindingCounts[(int)PriorityTier.Monitor]}", false, true),
+            ("Select a row for the per-finding rationale, or export the full plan from Reports → Export Remediation Plan.", false, false),
+            ("Top actions", true, false),
+        };
+        foreach (var a in plan.Actions.Take(12))
+        {
+            blocks.Add(($"{a.Rank}. [{a.Tier switch { PriorityTier.FixNow => "Fix now", PriorityTier.FixNext => "Fix next", PriorityTier.Planned => "Planned", _ => "Monitor" }}] {a.Category}  —  {a.MaxScore:0}/100, {a.FindingCount} finding(s), {a.Hosts.Count} host(s)", false, false));
+            blocks.Add(("    " + a.Guidance, false, false));
+        }
         _detail.SetBlocks(blocks);
     }
 

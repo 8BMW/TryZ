@@ -451,7 +451,7 @@ internal sealed class ReportsView : ModuleView
         foreach (var c in new[] { _cover, _severity, _findings, _evidence, _hosts })
             c.CheckedChanged += (_, _) => OptionsChanged();
 
-        _format.AddRange("HTML report", "CSV findings", "PDF report", "Markdown report", "JSON findings", "SARIF 2.1.0");
+        _format.AddRange("HTML report", "CSV findings", "PDF report", "Markdown report", "JSON findings", "SARIF 2.1.0", "Remediation plan");
         _format.SelectedIndex = 0;
         _outputGroup.Add("Format", _format);
 
@@ -468,6 +468,7 @@ internal sealed class ReportsView : ModuleView
             3 => ExportFormat.Markdown,
             4 => ExportFormat.Json,
             5 => ExportFormat.Sarif,
+            6 => ExportFormat.Plan,
             _ => ExportFormat.Html,
         });
 

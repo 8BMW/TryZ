@@ -32,6 +32,12 @@ internal sealed class ScanContext : IDisposable
     private readonly double[] _phase = new double[5];
     private readonly HttpClient _http;
     private readonly HttpClient _httpFollow;
+    // Form login: a shared cookie jar the handlers read/write, the login endpoint, and single-flight re-login state.
+    private readonly CookieContainer? _cookies;
+    private readonly Uri? _loginUri;
+    private readonly SemaphoreSlim _loginGate = new(1, 1);
+    private long _lastLoginTicks = long.MinValue;
+    private volatile bool _loggedIn;
     private TaskCompletionSource _resume = CreateResumed();
     // Completed while paused; replaced by a fresh (pending) source on resume.
     private TaskCompletionSource _pauseStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -53,9 +59,18 @@ internal sealed class ScanContext : IDisposable
         Concurrency = new SemaphoreSlim(Options.Threads, Options.Threads);
         foreach (var ex in Options.Exclusions)
             if (IpRange.TryParse(ex, out var range)) _exclusions.Add(range);
+        if (Options.FormLogin && Uri.TryCreate(Options.LoginUrl, UriKind.Absolute, out var lu)
+            && lu.Scheme is "http" or "https")
+        {
+            _cookies = new CookieContainer();
+            _loginUri = lu;
+        }
         _http = CreateClient(followRedirects: false);
         _httpFollow = CreateClient(followRedirects: true);
     }
+
+    /// <summary>True when form login is configured and a login endpoint was parsed.</summary>
+    public bool FormLoginEnabled => _loginUri != null;
 
     public ScanRequest Request { get; }
     public ScanOptions Options { get; }
@@ -376,7 +391,10 @@ internal sealed class ScanContext : IDisposable
             ConnectTimeout = TimeSpan.FromMilliseconds(Options.ConnectTimeoutMs),
             PooledConnectionLifetime = TimeSpan.FromMinutes(2),
             MaxConnectionsPerServer = Math.Max(2, Math.Min(Options.Threads, 32)),
-            UseCookies = false,
+            // With form login, a shared cookie jar keeps the session across requests and survives re-authentication;
+            // otherwise cookies are stateless and only a fixed Cookie header (below) is sent.
+            UseCookies = _cookies != null,
+            CookieContainer = _cookies ?? new CookieContainer(),
             SslOptions = new System.Net.Security.SslClientAuthenticationOptions
             {
                 // Certificate problems are reported by TlsAudit; HTTP checks must still reach the content.
@@ -405,7 +423,13 @@ internal sealed class ScanContext : IDisposable
         h.TryAddWithoutValidation("User-Agent", Options.UserAgent);
         h.TryAddWithoutValidation("Accept", "*/*");
         // Authenticated scanning: a session cookie, custom headers and/or an Authorization header reach every request.
-        if (Options.SessionCookie.Length > 0) h.TryAddWithoutValidation("Cookie", Options.SessionCookie);
+        // When a cookie jar is active (form login), seed the jar with the static cookie instead of a fixed header so it
+        // can be replaced by the Set-Cookie of a (re-)login; otherwise send it as a fixed header on every request.
+        if (Options.SessionCookie.Length > 0)
+        {
+            if (_cookies != null && _loginUri != null) SeedCookies(_cookies, _loginUri, Options.SessionCookie);
+            else h.TryAddWithoutValidation("Cookie", Options.SessionCookie);
+        }
         string auth = Options.AuthorizationHeader;
         if (auth.Length == 0 && Options.BasicUser.Length > 0)
             auth = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"{Options.BasicUser}:{Options.BasicPassword}"));
@@ -429,6 +453,107 @@ internal sealed class ScanContext : IDisposable
         return Uri.TryCreate(p, UriKind.Absolute, out var u) ? new WebProxy(u) { BypassProxyOnLocal = false } : null;
     }
 
+    // ---------------------------------------------------------------- form login & session refresh
+
+    /// <summary>
+    /// Posts the configured credentials to the login endpoint, storing the session cookie in the shared jar. Called once
+    /// before the web phase and again, under a single-flight lock, whenever a response looks logged out. Returns whether
+    /// the login appears to have succeeded.
+    /// </summary>
+    public async Task<bool> LoginAsync()
+    {
+        if (_loginUri == null) return false;
+        var fields = new List<KeyValuePair<string, string>>
+        {
+            new(Options.LoginUserField, Options.LoginUser),
+            new(Options.LoginPassField, Options.LoginPassword),
+        };
+        foreach (var kv in ParsePairs(Options.LoginExtraData)) fields.Add(kv);
+        try
+        {
+            await GateAsync().ConfigureAwait(false);
+            using var work = BeginWork();
+            using var content = new FormUrlEncodedContent(fields);
+            using var req = new HttpRequestMessage(HttpMethod.Post, _loginUri) { Content = content };
+            using var resp = await _httpFollow.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, Token).ConfigureAwait(false);
+            int status = (int)resp.StatusCode;
+            byte[] body = await ReadLimitedAsync(resp.Content, 64 * 1024).ConfigureAwait(false);
+            string text = Encoding.UTF8.GetString(body);
+            bool marker = Options.LoginLoggedOutMarker.Length > 0 && text.Contains(Options.LoginLoggedOutMarker, StringComparison.OrdinalIgnoreCase);
+            bool ok = status < 400 && !marker;
+            _loggedIn = ok;
+            _lastLoginTicks = _clock.ElapsedTicks;
+            Log(ok ? LogLevel.Ok : LogLevel.Warn, "login",
+                ok ? $"Form login as '{Options.LoginUser}' at {_loginUri.AbsolutePath} succeeded (HTTP {status})"
+                   : $"Form login at {_loginUri.AbsolutePath} did not look successful (HTTP {status}{(marker ? ", logged-out marker present" : "")})");
+            return ok;
+        }
+        catch (OperationCanceledException) when (Token.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidOperationException or OperationCanceledException)
+        {
+            Log(LogLevel.Warn, "login", $"Form login request failed: {ex.GetType().Name}");
+            return false;
+        }
+    }
+
+    /// <summary>Re-authenticates if the given response looks logged out. Single-flight with a short cooldown so parallel
+    /// workers that all hit an expired session trigger only one re-login. Returns true when the session is (now) valid.</summary>
+    public async Task<bool> EnsureSessionAsync(int status, string location, string body)
+    {
+        if (_loginUri == null || !LooksLoggedOut(status, location, body)) return false;
+        await _loginGate.WaitAsync(Token).ConfigureAwait(false);
+        try
+        {
+            // Another worker may have just re-authenticated; treat a very recent login as still valid.
+            if (_loggedIn && _lastLoginTicks != long.MinValue
+                && (_clock.ElapsedTicks - _lastLoginTicks) / (double)Stopwatch.Frequency < 8)
+                return true;
+            Log(LogLevel.Notice, "login", "Session looks expired; re-authenticating");
+            return await LoginAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _loginGate.Release();
+        }
+    }
+
+    /// <summary>Heuristic: does this response indicate the session is not authenticated?</summary>
+    public bool LooksLoggedOut(int status, string location, string body)
+    {
+        if (_loginUri == null) return false;
+        if (status is 401 or 403) return true;
+        if (Options.LoginLoggedOutMarker.Length > 0 && body.Contains(Options.LoginLoggedOutMarker, StringComparison.OrdinalIgnoreCase)) return true;
+        if (status is >= 300 and < 400 && location.Length > 0
+            && location.Contains(_loginUri.AbsolutePath, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private static void SeedCookies(CookieContainer jar, Uri origin, string cookieHeader)
+    {
+        foreach (var part in cookieHeader.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int eq = part.IndexOf('=');
+            if (eq <= 0) continue;
+            string name = part[..eq].Trim();
+            string value = part[(eq + 1)..].Trim();
+            if (name.Length == 0) continue;
+            try { jar.Add(new Cookie(name, value, "/", origin.Host)); }
+            catch (CookieException) { }
+            catch (ArgumentException) { }
+        }
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> ParsePairs(string data)
+    {
+        foreach (var part in data.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = part.IndexOf('=');
+            string name = Uri.UnescapeDataString((eq >= 0 ? part[..eq] : part).Trim());
+            string value = eq >= 0 ? Uri.UnescapeDataString(part[(eq + 1)..].Trim()) : string.Empty;
+            if (name.Length > 0) yield return new KeyValuePair<string, string>(name, value);
+        }
+    }
+
     // ---------------------------------------------------------------- shared probe (active + discovery modules)
 
     /// <summary>Result of a <see cref="ProbeAsync"/> request: a thin, allocation-light view used by the active checks.</summary>
@@ -450,8 +575,12 @@ internal sealed class ScanContext : IDisposable
     /// decoded response (body capped), or null on transport failure. Used by the active-audit and discovery modules so
     /// they share pacing, pinning, auth and proxy settings with the passive checks.
     /// </summary>
-    public async Task<Probe?> ProbeAsync(HttpMethod method, Uri uri, bool follow = false,
-        HttpContent? content = null, int maxBody = 256 * 1024)
+    public Task<Probe?> ProbeAsync(HttpMethod method, Uri uri, bool follow = false,
+        HttpContent? content = null, int maxBody = 256 * 1024, IReadOnlyList<(string Name, string Value)>? extraHeaders = null) =>
+        ProbeAsync(method, uri, follow, content, maxBody, extraHeaders, canRelogin: true);
+
+    private async Task<Probe?> ProbeAsync(HttpMethod method, Uri uri, bool follow,
+        HttpContent? content, int maxBody, IReadOnlyList<(string Name, string Value)>? extraHeaders, bool canRelogin)
     {
         await GateAsync().ConfigureAwait(false);
         using var work = BeginWork();
@@ -459,6 +588,9 @@ internal sealed class ScanContext : IDisposable
         try
         {
             using var req = new HttpRequestMessage(method, uri) { Content = content };
+            if (extraHeaders != null)
+                foreach (var (name, value) in extraHeaders)
+                    req.Headers.TryAddWithoutValidation(name, value);
             var client = follow ? _httpFollow : _http;
             using var resp = await client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, Token).ConfigureAwait(false);
             var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -467,7 +599,16 @@ internal sealed class ScanContext : IDisposable
             byte[] body = method == HttpMethod.Head ? Array.Empty<byte>() : await ReadLimitedAsync(resp.Content, maxBody).ConfigureAwait(false);
             double ms = sw.Elapsed.TotalMilliseconds;
             CountRequest(ms, (int)resp.StatusCode >= 500);
-            return new Probe { Uri = uri, Status = (int)resp.StatusCode, Body = Encoding.UTF8.GetString(body), Headers = headers, LatencyMs = ms };
+            var probe = new Probe { Uri = uri, Status = (int)resp.StatusCode, Body = Encoding.UTF8.GetString(body), Headers = headers, LatencyMs = ms };
+            // Form login: if the session has expired, re-authenticate and (for a body-less GET) retry once so the check
+            // sees the authenticated response. Content-bearing requests cannot be replayed, so they only trigger re-login.
+            if (_loginUri != null && LooksLoggedOut(probe.Status, probe.Header("Location"), probe.Body))
+            {
+                bool valid = await EnsureSessionAsync(probe.Status, probe.Header("Location"), probe.Body).ConfigureAwait(false);
+                if (valid && canRelogin && content == null)
+                    return await ProbeAsync(method, uri, follow, null, maxBody, extraHeaders, canRelogin: false).ConfigureAwait(false) ?? probe;
+            }
+            return probe;
         }
         catch (OperationCanceledException) when (Token.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or SocketException or InvalidOperationException)
@@ -554,6 +695,7 @@ internal sealed class ScanContext : IDisposable
         _http.Dispose();
         _httpFollow.Dispose();
         Concurrency.Dispose();
+        _loginGate.Dispose();
         lock (_pauseLock) _resume.TrySetResult();
     }
 }

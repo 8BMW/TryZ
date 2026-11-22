@@ -50,12 +50,24 @@ internal sealed class ScanOptions
     public string BasicUser { get; init; } = string.Empty;
     public string BasicPassword { get; init; } = string.Empty;
 
+    // ---- form login (session is established, maintained and refreshed by the engine) -----------
+    /// <summary>Post credentials to <see cref="LoginUrl"/>, keep the session cookie, and re-login when it expires.</summary>
+    public bool FormLogin { get; init; }
+    public string LoginUrl { get; init; } = string.Empty;
+    public string LoginUser { get; init; } = string.Empty;
+    public string LoginPassword { get; init; } = string.Empty;
+    public string LoginUserField { get; init; } = "username";
+    public string LoginPassField { get; init; } = "password";
+    public string LoginExtraData { get; init; } = string.Empty;
+    public string LoginLoggedOutMarker { get; init; } = string.Empty;
+
     // ---- upstream proxy (Burp / ZAP / corporate) --------------------------------------------
     /// <summary>Route all HTTP(S) requests through this proxy, e.g. "http://127.0.0.1:8080". Empty = direct.</summary>
     public string HttpProxy { get; init; } = string.Empty;
 
     // ---- active (intrusive) web testing -----------------------------------------------------
-    /// <summary>Run active injection checks (reflected XSS, SQLi, path traversal, open redirect) on discovered parameters.</summary>
+    /// <summary>Run active injection checks (reflected XSS, SQLi, path traversal, open redirect, template &amp; command
+    /// injection, SSRF, CORS and XXE) on discovered parameters and endpoints.</summary>
     public bool RunActiveChecks { get; init; }
     /// <summary>Hard cap on the number of parameters actively fuzzed, to bound request volume.</summary>
     public int MaxActiveTargets { get; init; } = 400;
@@ -67,6 +79,13 @@ internal sealed class ScanOptions
     public bool RunSubdomainScan { get; init; }
     /// <summary>Optional file of extra wordlist entries for content discovery, one per line.</summary>
     public string WordlistPath { get; init; } = string.Empty;
+
+    // ---- headless browser crawl -------------------------------------------------------------
+    /// <summary>Render each web root with an installed Chromium browser (DevTools protocol) to discover links and forms
+    /// in JavaScript-driven apps, feeding them to the active audit.</summary>
+    public bool BrowserCrawl { get; init; }
+    public string BrowserPath { get; init; } = string.Empty;
+    public int BrowserMaxPages { get; init; } = 40;
 
     public static ScanOptions From(AppSettings s, int profileIndex, int threads)
     {
@@ -115,6 +134,14 @@ internal sealed class ScanOptions
         AuthorizationHeader = s.AuthorizationHeader?.Trim() ?? string.Empty,
         BasicUser = s.BasicUser?.Trim() ?? string.Empty,
         BasicPassword = s.BasicPassword ?? string.Empty,
+        FormLogin = s.FormLoginEnabled && !string.IsNullOrWhiteSpace(s.LoginUrl) && !string.IsNullOrWhiteSpace(s.LoginUser),
+        LoginUrl = s.LoginUrl?.Trim() ?? string.Empty,
+        LoginUser = s.LoginUser ?? string.Empty,
+        LoginPassword = s.LoginPassword ?? string.Empty,
+        LoginUserField = string.IsNullOrWhiteSpace(s.LoginUserField) ? "username" : s.LoginUserField.Trim(),
+        LoginPassField = string.IsNullOrWhiteSpace(s.LoginPassField) ? "password" : s.LoginPassField.Trim(),
+        LoginExtraData = s.LoginExtraData?.Trim() ?? string.Empty,
+        LoginLoggedOutMarker = s.LoginLoggedOutMarker?.Trim() ?? string.Empty,
         HttpProxy = s.HttpProxy?.Trim() ?? string.Empty,
         // Active checks are intrusive: only the Full and Custom profiles run them, and only when enabled in settings.
         RunActiveChecks = s.RunActiveChecks && profile is 1 or 3,
@@ -122,5 +149,9 @@ internal sealed class ScanOptions
         RunContentDiscovery = s.RunContentDiscovery && profile != 0,
         RunSubdomainScan = s.RunSubdomainScan,
         WordlistPath = s.WordlistPath?.Trim() ?? string.Empty,
+        // The browser crawl is heavier than the static crawl, so it runs only on the Full and Custom profiles.
+        BrowserCrawl = s.BrowserCrawl && profile is 1 or 3,
+        BrowserPath = s.BrowserPath?.Trim() ?? string.Empty,
+        BrowserMaxPages = Math.Clamp(s.BrowserMaxPages, 1, 1000),
     };
 }

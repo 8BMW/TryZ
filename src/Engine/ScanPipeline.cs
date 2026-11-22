@@ -83,6 +83,13 @@ internal static class ScanPipeline
             }).ConfigureAwait(false);
         ctx.SetPhase(ScanContext.PhasePorts, 1);
 
+        // Establish an authenticated session before the web checks and crawl, if form login is configured.
+        if (ctx.FormLoginEnabled)
+        {
+            ctx.Log(LogLevel.Info, "login", "Form login enabled; authenticating before web checks");
+            await ctx.LoginAsync().ConfigureAwait(false);
+        }
+
         // ---------------------------------------------------------------- 3. vulnerability audit (TLS, HTTP, CVE lookup)
         ctx.ResetPhase(ScanContext.PhaseAudit);
         var webRoots = new List<Uri>();
@@ -145,6 +152,15 @@ internal static class ScanPipeline
             await Crawler.RunAsync(ctx, webRoots.Distinct().ToList()).ConfigureAwait(false);
         else
             ctx.Log(LogLevel.Info, "crawler", "No web service found; crawl skipped");
+
+        // Optional JavaScript rendering pass: a headless browser finds links and forms that only exist after scripts run.
+        if (o.BrowserCrawl && webRoots.Count > 0)
+        {
+            int task = ctx.AddTask("Headless browser crawl", "Web Crawler");
+            ctx.UpdateTask(task, TaskState.Running, 0);
+            await BrowserCrawler.RunAsync(ctx, webRoots.Distinct().ToList()).ConfigureAwait(false);
+            ctx.UpdateTask(task, TaskState.Done, 100);
+        }
         if (o.CheckTakeover)
         {
             int task = ctx.AddTask("Dangling DNS check", "Web Crawler");

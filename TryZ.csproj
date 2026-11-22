@@ -14,7 +14,8 @@
     <ApplicationVisualStyles>true</ApplicationVisualStyles>
     <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <NoWarn>$(NoWarn);WFO1000</NoWarn>
+    <!-- SYSLIB0014: System.Net.Mail.SmtpClient is the built-in SMTP client used for optional new-finding e-mail alerts. -->
+    <NoWarn>$(NoWarn);WFO1000;SYSLIB0014</NoWarn>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- WinForms needs the OS culture (e.g. en-US / 1033) at startup; invariant-globalization mode rejects it and
          crashes before the window shows. All formatting/parsing uses CultureInfo.InvariantCulture explicitly, so

@@ -21,6 +21,7 @@ internal static class Program
             if (TryZ.Shell.HeadlessRunner.IsHeadless(args)) return TryZ.Shell.HeadlessRunner.Run(args);
 
             var settings = AppSettings.Load();
+            FileLog.Configure(settings.LogToFile);
             if (settings.ShowSplash)
             {
                 using var splash = new SplashForm();

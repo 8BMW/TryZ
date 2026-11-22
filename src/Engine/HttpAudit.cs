@@ -769,12 +769,7 @@ internal static class HttpAudit
     private static void Add(Run run, Severity sev, string title, int cwe, string description, string evidence, string remediation) =>
         run.Ctx.AddFinding(sev, title, run.Svc.Host.Ip, run.Svc.Port, cwe, description, evidence, remediation);
 
-    private static string HostForUrl(LiveHost host)
-    {
-        string h = host.Hostname.Trim().TrimEnd('.');
-        if (h.Length > 0 && !IPAddress.TryParse(h, out _)) return h;
-        return host.Address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{host.Ip}]" : host.Ip;
-    }
+    private static string HostForUrl(LiveHost host) => host.UrlHost;
 
     private static Uri? Location(Resp r)
     {

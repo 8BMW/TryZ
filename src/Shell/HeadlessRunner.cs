@@ -12,13 +12,14 @@ namespace TryZ.Shell;
 /// </summary>
 internal static class HeadlessRunner
 {
-    /// <summary>True when the arguments request a headless scan (as opposed to launching the GUI).</summary>
+    /// <summary>True when the arguments request a headless action (scan or scheduling) as opposed to launching the GUI.</summary>
     public static bool IsHeadless(string[] args) =>
-        args.Any(a => a is "scan" or "--scan" or "--target" or "-t" || a is "--help" or "-h" && args.Contains("scan"));
+        args.Any(a => a is "scan" or "--scan" or "--target" or "-t" or "schedule" || a is "--help" or "-h" && (args.Contains("scan") || args.Contains("schedule")));
 
     public static int Run(string[] args)
     {
         EnsureConsole();
+        if (args.Length > 0 && args[0] == "schedule") return ScheduleCommand.Run(args);
         if (args.Contains("--help") || args.Contains("-h"))
         {
             PrintUsage();
@@ -54,6 +55,7 @@ internal static class HeadlessRunner
         }
 
         var settings = AppSettings.Load();
+        FileLog.Configure(settings.LogToFile);
         o.ApplyTo(settings);
         var options = ScanOptions.From(settings, o.ProfileIndex, o.Threads > 0 ? o.Threads : settings.DefaultThreads);
         var request = new ScanRequest(o.Target, o.ProfileIndex, options.Threads, options);
@@ -68,7 +70,43 @@ internal static class HeadlessRunner
 
         PrintSummary(session);
         WriteReports(o, session, settings);
+        MaybeAlert(o, session, settings);
         return exit;
+    }
+
+    /// <summary>After a scan, compares the findings with the stored baseline for this target and sends alerts for new ones.</summary>
+    private static void MaybeAlert(Opts o, Session session, AppSettings settings)
+    {
+        if (o.Alerts) settings.AlertOnNewFindings = true;
+        if (!Alerting.IsConfigured(settings)) return;
+        try
+        {
+            var all = session.Findings.Items;
+            bool firstRun = !FindingBaseline.Exists(o.Target);
+            var baseline = FindingBaseline.Load(o.Target);
+            var newFindings = firstRun
+                ? new List<Finding>()
+                : baseline.NewSince(all).Where(f => (int)f.Severity >= settings.AlertMinSeverity).ToList();
+            baseline.Update(all, o.Target);
+
+            if (firstRun)
+            {
+                Console.Error.WriteLine($"  alerts: baseline established ({all.Count} finding(s) recorded); no alert on the first scan of a target");
+                return;
+            }
+            if (newFindings.Count == 0)
+            {
+                Console.Error.WriteLine("  alerts: no new findings at or above the alert severity since the last scan");
+                return;
+            }
+            var result = Alerting.SendAsync(settings, o.Target, newFindings).GetAwaiter().GetResult();
+            Console.Error.WriteLine($"  alerts: {newFindings.Count} new finding(s) — webhook {(result.WebhookSent ? "sent" : "off/failed")}, email {(result.EmailSent ? "sent" : "off/failed")}");
+            foreach (var err in result.Errors) Console.Error.WriteLine($"  alerts: {err}");
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"tryz: alerting error: {ex.Message}");
+        }
     }
 
     private static async Task<int> RunScanAsync(ScanRequest request, Session session, bool quiet)
@@ -151,11 +189,17 @@ internal static class HeadlessRunner
               --rate <n>             Max requests per second
 
             Modules:
-              --active               Enable active injection testing (XSS, SQLi, traversal, open redirect)
+              --active               Enable active injection testing (XSS, SQLi, traversal, open redirect,
+                                     template & command injection, SSRF, CORS, XXE)
               --discover             Enable dictionary content discovery
               --subdomains           Enable DNS sub-domain enumeration
+              --browser              Enable the headless-browser crawl (renders JavaScript apps via Edge/Chrome)
               --udp                  Enable UDP service probes
               --nvd <key>            Enable NVD CVE lookup with the given API key
+
+            Alerting:
+              --alerts               Compare against the last scan of this target and send webhook/e-mail
+                                     alerts for new findings (configure channels in the app's Options).
 
             Authenticated scanning:
               --cookie <value>       Cookie header sent with every request
@@ -165,12 +209,19 @@ internal static class HeadlessRunner
 
             Output:
               --out <path>           Report path (extension set per format when multiple)
-              --format <list>        html,json,sarif,csv,md,pdf           (default: html,json)
+              --format <list>        html,json,sarif,csv,md,plan,pdf      (default: html,json)
               --wordlist <path>      Extra word-list file for content discovery
               --quiet                Only print findings and the summary
 
-            Example:
+            Scheduling (Windows Task Scheduler):
+              TryZ.exe schedule add --name <id> <target> --authorize (--every <min> | --at HH:mm) [-- <scan options>]
+              TryZ.exe schedule list
+              TryZ.exe schedule remove --name <id>
+
+            Examples:
               TryZ.exe scan https://example.test --authorize --active --discover --format html,sarif --out report
+              TryZ.exe scan https://example.test --authorize --alerts --quiet
+              TryZ.exe schedule add --name nightly example.test --authorize --at 02:30 -- --active --alerts
             """);
     }
 
@@ -200,7 +251,7 @@ internal static class HeadlessRunner
         public int ProfileIndex = 1;
         public int Threads;
         public int Rate;
-        public bool Active, Discover, Subdomains, Udp, Quiet;
+        public bool Active, Discover, Subdomains, Udp, Quiet, Alerts, Browser;
         public string Nvd = string.Empty;
         public string Cookie = string.Empty;
         public string Auth = string.Empty;
@@ -229,7 +280,9 @@ internal static class HeadlessRunner
                     case "--active": o.Active = true; break;
                     case "--discover": o.Discover = true; break;
                     case "--subdomains": o.Subdomains = true; break;
+                    case "--browser": o.Browser = true; break;
                     case "--udp": o.Udp = true; break;
+                    case "--alerts": o.Alerts = true; break;
                     case "--nvd": o.Nvd = Next(a); break;
                     case "--cookie": o.Cookie = Next(a); break;
                     case "--header" or "-H": o.Headers.Add(Next(a)); break;
@@ -256,6 +309,7 @@ internal static class HeadlessRunner
             if (Active) s.RunActiveChecks = true;
             if (Discover) s.RunContentDiscovery = true;
             if (Subdomains) s.RunSubdomainScan = true;
+            if (Browser) s.BrowserCrawl = true;
             if (Udp) s.UdpScan = true;
             if (Nvd.Length > 0) { s.EnableNvd = true; s.NvdApiKey = Nvd; }
             if (Cookie.Length > 0) s.SessionCookie = Cookie;
@@ -289,6 +343,7 @@ internal static class HeadlessRunner
                     "sarif" => ExportFormat.Sarif,
                     "csv" => ExportFormat.Csv,
                     "md" or "markdown" => ExportFormat.Markdown,
+                    "plan" => ExportFormat.Plan,
                     "pdf" => ExportFormat.Pdf,
                     _ => throw new ArgumentException($"unknown format '{raw}'"),
                 });

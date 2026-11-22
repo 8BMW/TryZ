@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using TryZ.Data;
 
@@ -27,6 +28,18 @@ internal sealed class LiveHost
     public int LatencyMs { get; init; }
     public int Ttl { get; init; }
     public string OsGuess { get; init; } = "Unknown";
+
+    /// <summary>Host for use in a URL authority: the typed name when present, otherwise the IP, with IPv6 literals
+    /// wrapped in brackets (e.g. <c>[fe80::1]</c>) so the resulting URL is valid.</summary>
+    public string UrlHost
+    {
+        get
+        {
+            string h = Hostname.Trim().TrimEnd('.');
+            if (h.Length > 0 && !IPAddress.TryParse(h, out _)) return h;
+            return Address.AddressFamily == AddressFamily.InterNetworkV6 ? $"[{Ip}]" : Ip;
+        }
+    }
 }
 
 /// <summary>An open TCP port after service identification.</summary>

@@ -16,6 +16,7 @@ internal static class ReportExporter
         ExportFormat.Sarif => new("SARIF 2.1.0", "sarif", "SARIF file (*.sarif)|*.sarif", "findings"),
         ExportFormat.Pdf => new("PDF report", "pdf", "PDF file (*.pdf)|*.pdf", "report"),
         ExportFormat.Markdown => new("Markdown report", "md", "Markdown file (*.md)|*.md", "report"),
+        ExportFormat.Plan => new("Remediation plan", "md", "Markdown file (*.md)|*.md", "remediation-plan"),
         _ => throw new ArgumentOutOfRangeException(nameof(format)),
     };
 
@@ -31,6 +32,7 @@ internal static class ReportExporter
             case ExportFormat.Json: File.WriteAllText(path, StructuredReport.FindingsJson(session), utf8); break;
             case ExportFormat.Sarif: File.WriteAllText(path, StructuredReport.Sarif(session), utf8); break;
             case ExportFormat.Markdown: File.WriteAllText(path, StructuredReport.Markdown(session, settings.ReportAuthorLine), utf8); break;
+            case ExportFormat.Plan: File.WriteAllText(path, RemediationPlan.Build(session.Findings.Items).ToMarkdown(settings.ReportAuthorLine), utf8); break;
             case ExportFormat.Pdf: PdfReport.Write(path, session, settings.ReportAuthorLine); break;
             default: throw new ArgumentOutOfRangeException(nameof(format));
         }

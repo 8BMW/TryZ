@@ -358,6 +358,7 @@ internal sealed class OptionsDialog : SkinDialog
     private SkinCheck _confirm = null!;
     private SkinCheck _autoscroll = null!;
     private SkinCheck _debugLines = null!;
+    private SkinCheck _logToFile = null!;
     private SkinSpin _threads = null!;
     private SkinCombo _profile = null!;
     private SkinSpin _retries = null!;
@@ -388,12 +389,36 @@ internal sealed class OptionsDialog : SkinDialog
     private TextField _basicPass = null!;
     private TextField _extraHeader = null!;
     private TextField _proxy = null!;
+    // Form login
+    private SkinCheck _formLogin = null!;
+    private TextField _loginUrl = null!;
+    private TextField _loginUser = null!;
+    private TextField _loginPass = null!;
+    private TextField _loginUserField = null!;
+    private TextField _loginPassField = null!;
+    private TextField _loginExtra = null!;
+    private TextField _loginMarker = null!;
     // Active testing
     private SkinCheck _active = null!;
     private SkinSpin _activeMax = null!;
     private SkinCheck _discover = null!;
     private SkinCheck _subdomains = null!;
     private TextField _wordlist = null!;
+    private SkinCheck _browserCrawl = null!;
+    private TextField _browserPath = null!;
+    private SkinSpin _browserMaxPages = null!;
+    // Alerts
+    private SkinCheck _alertOnNew = null!;
+    private SkinCombo _alertSeverity = null!;
+    private TextField _webhook = null!;
+    private SkinCheck _emailEnabled = null!;
+    private TextField _smtpHost = null!;
+    private SkinSpin _smtpPort = null!;
+    private SkinCheck _smtpStartTls = null!;
+    private TextField _smtpUser = null!;
+    private TextField _smtpPass = null!;
+    private TextField _emailFrom = null!;
+    private TextField _emailTo = null!;
 
     public OptionsDialog(AppSettings settings) : base("Options", 660, 500)
     {
@@ -415,6 +440,7 @@ internal sealed class OptionsDialog : SkinDialog
         AddPage(engine, "UDP Services", BuildUdp());
         AddPage(engine, "Threat Intelligence", BuildIntel());
         AddPage(engine, "Detection Rules", BuildRules());
+        AddPage(null, "Alerts", BuildAlerts());
         AddPage(null, "Logging", BuildLogging());
         AddPage(null, "Reports", BuildReports());
         scan.Expanded = true;
@@ -642,7 +668,27 @@ internal sealed class OptionsDialog : SkinDialog
         _proxy = proxy.Add("Proxy URL", new TextField(cue: "e.g. http://127.0.0.1:8080 (Burp / ZAP)") { Mono = true });
         _proxy.Value = _settings.HttpProxy ?? string.Empty;
         proxy.Add(null, Note("When set, every HTTP(S) request is routed through this proxy instead of connecting directly, so the proxy enforces host pinning and the exclusion list. Leave empty for direct connections."), height: 44);
-        return Stack(cred, proxy);
+
+        var login = new EtchedGroup("Form Login");
+        login.LabelWidth = 110;
+        _formLogin = login.Add(null, new SkinCheck("Log in with a form and keep the session fresh", _settings.FormLoginEnabled), height: 17);
+        _loginUrl = login.Add("Login URL", new TextField(cue: "URL the login form posts to, e.g. https://app/login") { Mono = true });
+        _loginUrl.Value = _settings.LoginUrl ?? string.Empty;
+        _loginUser = login.Add("Username", new TextField(cue: "Account to log in as"));
+        _loginUser.Value = _settings.LoginUser ?? string.Empty;
+        _loginPass = login.Add("Password", new TextField(cue: "Account password (stored encrypted)"));
+        _loginPass.Value = _settings.LoginPassword ?? string.Empty;
+        _loginPass.Edit.UseSystemPasswordChar = true;
+        _loginUserField = login.Add("User field", new TextField(cue: "form field name for the user (default: username)") { Mono = true });
+        _loginUserField.Value = string.IsNullOrWhiteSpace(_settings.LoginUserField) ? "username" : _settings.LoginUserField;
+        _loginPassField = login.Add("Password field", new TextField(cue: "form field name for the password (default: password)") { Mono = true });
+        _loginPassField.Value = string.IsNullOrWhiteSpace(_settings.LoginPassField) ? "password" : _settings.LoginPassField;
+        _loginExtra = login.Add("Extra fields", new TextField(cue: "extra form fields, e.g. remember=1&tenant=acme") { Mono = true });
+        _loginExtra.Value = _settings.LoginExtraData ?? string.Empty;
+        _loginMarker = login.Add("Logged-out text", new TextField(cue: "text in a response that means logged out, e.g. Sign in") { Mono = true });
+        _loginMarker.Value = _settings.LoginLoggedOutMarker ?? string.Empty;
+        login.Add(null, Note("The engine posts these credentials before crawling and whenever a response looks logged out (HTTP 401/403, a redirect to the login URL, or the logged-out text), then retries. The session cookie is held only in memory for the scan."), height: 58);
+        return Stack(cred, proxy, login);
     }
 
     private Control BuildActive()
@@ -651,7 +697,7 @@ internal sealed class OptionsDialog : SkinDialog
         _active = g.Add(null, new SkinCheck("Send active payloads to discovered parameters (intrusive)", _settings.RunActiveChecks), height: 17);
         g.LabelWidth = 130;
         _activeMax = g.Add("Max parameters", new SkinSpin(Math.Clamp(_settings.MaxActiveTargets, 1, 5000), 1, 5000, 50), width: 90);
-        g.Add(null, Note("Tests each crawled parameter for reflected XSS, SQL injection, path traversal and open redirect, with a per-request baseline to limit false positives. Payloads are non-destructive. Runs only on the Full and Custom profiles and only against authorized targets."), height: 58);
+        g.Add(null, Note("Tests each crawled parameter for reflected XSS, SQL injection, path traversal, open redirect, server-side template injection, OS command injection (time-based), SSRF, plus per-endpoint CORS and XXE checks, with a per-request baseline to limit false positives. Payloads are non-destructive. Runs only on the Full and Custom profiles and only against authorized targets."), height: 72);
 
         var disc = new EtchedGroup("Content & Name Discovery");
         _discover = disc.Add(null, new SkinCheck("Dictionary discovery of unlinked paths (admin, backups, .git, API)", _settings.RunContentDiscovery), height: 17);
@@ -660,7 +706,15 @@ internal sealed class OptionsDialog : SkinDialog
         _wordlist = disc.Add("Word list", new TextField(cue: "Optional extra word-list file, one path per line") { Mono = true });
         _wordlist.Value = _settings.WordlistPath ?? string.Empty;
         disc.Add(null, Note("Discovery probes a built-in list plus your file and filters catch-all pages with a soft-404 baseline. Sub-domain enumeration only resolves names; it never scans a host that is not in scope."), height: 44);
-        return Stack(g, disc);
+
+        var browser = new EtchedGroup("Headless Browser Crawl");
+        browser.LabelWidth = 110;
+        _browserCrawl = browser.Add(null, new SkinCheck("Render JavaScript apps with an installed browser to find hidden links and forms", _settings.BrowserCrawl), height: 17);
+        _browserMaxPages = browser.Add("Max pages", new SkinSpin(Math.Clamp(_settings.BrowserMaxPages, 1, 1000), 1, 1000, 5), width: 90);
+        _browserPath = browser.Add("Browser path", new TextField(cue: "Optional path to msedge.exe / chrome.exe (auto-detected if empty)") { Mono = true });
+        _browserPath.Value = _settings.BrowserPath ?? string.Empty;
+        browser.Add(null, Note("Drives an installed Microsoft Edge or Google Chrome over the DevTools protocol (the same one Playwright uses) to render each web root, then feeds the links and forms its scripts create to the active audit. Nothing is installed; if no browser is found the crawl is skipped. Full and Custom profiles only."), height: 58);
+        return Stack(g, disc, browser);
     }
 
     private Control BuildUdp()
@@ -690,12 +744,48 @@ internal sealed class OptionsDialog : SkinDialog
         return Stack(g);
     }
 
+    private Control BuildAlerts()
+    {
+        var g = new EtchedGroup("New-finding Alerts");
+        g.LabelWidth = 110;
+        _alertOnNew = g.Add(null, new SkinCheck("Alert when a scheduled or headless scan finds something new", _settings.AlertOnNewFindings), height: 17);
+        _alertSeverity = g.Add("Minimum severity", new SkinCombo(), width: 120);
+        _alertSeverity.AddRange("Info", "Low", "Medium", "High", "Critical");
+        _alertSeverity.SelectedIndex = Math.Clamp(_settings.AlertMinSeverity, 0, 4);
+        _webhook = g.Add("Webhook URL", new TextField(cue: "Slack / Mattermost / Discord / generic https webhook") { Mono = true });
+        _webhook.Value = _settings.AlertWebhookUrl ?? string.Empty;
+        g.Add(null, Note("New findings are compared against the previous scan of the same target (stored under %APPDATA%\\TryZ\\state). The first scan of a target only establishes the baseline. Use --alerts on the command line, or a schedule, to drive alerts."), height: 44);
+
+        var mail = new EtchedGroup("E-mail (SMTP)");
+        mail.LabelWidth = 110;
+        _emailEnabled = mail.Add(null, new SkinCheck("Also send new-finding alerts by e-mail", _settings.AlertEmailEnabled), height: 17);
+        _smtpHost = mail.Add("SMTP server", new TextField(cue: "e.g. smtp.example.com") { Mono = true });
+        _smtpHost.Value = _settings.AlertSmtpHost ?? string.Empty;
+        _smtpPort = mail.Add("Port", new SkinSpin(Math.Clamp(_settings.AlertSmtpPort, 1, 65535), 1, 65535), width: 80);
+        _smtpStartTls = mail.Add(null, new SkinCheck("Use STARTTLS / SSL", _settings.AlertSmtpStartTls), height: 17);
+        _smtpUser = mail.Add("Username", new TextField(cue: "SMTP username (optional)"));
+        _smtpUser.Value = _settings.AlertSmtpUser ?? string.Empty;
+        _smtpPass = mail.Add("Password", new TextField(cue: "SMTP password (stored encrypted)"));
+        _smtpPass.Value = _settings.AlertSmtpPassword ?? string.Empty;
+        _smtpPass.Edit.UseSystemPasswordChar = true;
+        _emailFrom = mail.Add("From", new TextField(cue: "alerts@example.com"));
+        _emailFrom.Value = _settings.AlertEmailFrom ?? string.Empty;
+        _emailTo = mail.Add("To", new TextField(cue: "one or more addresses, comma-separated") { Mono = true });
+        _emailTo.Value = _settings.AlertEmailTo ?? string.Empty;
+        mail.Add(null, Note("The SMTP password is encrypted at rest with the Windows DPAPI, like the other credentials."), height: 30);
+        return Stack(g, mail);
+    }
+
     private Control BuildLogging()
     {
         var g = new EtchedGroup("Activity Log");
         _autoscroll = g.Add(null, new SkinCheck("Follow new lines automatically", _settings.LogAutoscroll), height: 17);
         _debugLines = g.Add(null, new SkinCheck("Show debug lines (per-probe errors and timeouts)", _settings.LogDebug), height: 17);
-        return Stack(g);
+
+        var file = new EtchedGroup("Persistent Log File");
+        _logToFile = file.Add(null, new SkinCheck("Append the activity log to a dated file while scanning", _settings.LogToFile), height: 17);
+        file.Add(null, Note($"Lines are written to {FileLog.DefaultDirectory}\\tryz-YYYYMMDD.log as the scan runs. Use Reports → Export Activity Log for a one-off copy of the current log."), height: 30);
+        return Stack(g, file);
     }
 
     private Control BuildReports()
@@ -729,6 +819,8 @@ internal sealed class OptionsDialog : SkinDialog
         _settings.ConfirmStop = _confirm.Checked;
         _settings.LogAutoscroll = _autoscroll.Checked;
         _settings.LogDebug = _debugLines.Checked;
+        _settings.LogToFile = _logToFile.Checked;
+        FileLog.Configure(_settings.LogToFile);
         _settings.DefaultThreads = _threads.Value;
         _settings.DefaultProfile = Math.Max(0, _profile.SelectedIndex);
         _settings.Retries = _retries.Value;
@@ -759,11 +851,33 @@ internal sealed class OptionsDialog : SkinDialog
         string extra = _extraHeader.Value.Trim();
         _settings.ExtraHeaders = extra.Contains(':') ? new List<string> { extra } : new List<string>();
         _settings.HttpProxy = _proxy.Value.Trim();
+        _settings.FormLoginEnabled = _formLogin.Checked;
+        _settings.LoginUrl = _loginUrl.Value.Trim();
+        _settings.LoginUser = _loginUser.Value.Trim();
+        _settings.LoginPassword = _loginPass.Value;
+        _settings.LoginUserField = _loginUserField.Value.Trim();
+        _settings.LoginPassField = _loginPassField.Value.Trim();
+        _settings.LoginExtraData = _loginExtra.Value.Trim();
+        _settings.LoginLoggedOutMarker = _loginMarker.Value.Trim();
         _settings.RunActiveChecks = _active.Checked;
         _settings.MaxActiveTargets = _activeMax.Value;
         _settings.RunContentDiscovery = _discover.Checked;
         _settings.RunSubdomainScan = _subdomains.Checked;
         _settings.WordlistPath = _wordlist.Value.Trim();
+        _settings.BrowserCrawl = _browserCrawl.Checked;
+        _settings.BrowserMaxPages = _browserMaxPages.Value;
+        _settings.BrowserPath = _browserPath.Value.Trim();
+        _settings.AlertOnNewFindings = _alertOnNew.Checked;
+        _settings.AlertMinSeverity = Math.Clamp(_alertSeverity.SelectedIndex, 0, 4);
+        _settings.AlertWebhookUrl = _webhook.Value.Trim();
+        _settings.AlertEmailEnabled = _emailEnabled.Checked;
+        _settings.AlertSmtpHost = _smtpHost.Value.Trim();
+        _settings.AlertSmtpPort = _smtpPort.Value;
+        _settings.AlertSmtpStartTls = _smtpStartTls.Checked;
+        _settings.AlertSmtpUser = _smtpUser.Value.Trim();
+        _settings.AlertSmtpPassword = _smtpPass.Value;
+        _settings.AlertEmailFrom = _emailFrom.Value.Trim();
+        _settings.AlertEmailTo = _emailTo.Value.Trim();
         _settings.Save();
         return true;
     }

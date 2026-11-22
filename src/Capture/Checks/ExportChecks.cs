@@ -57,6 +57,11 @@ internal sealed class ExportChecks : ICheckSuite
                 case ExportFormat.Pdf:
                     using (var pdf = PdfReader.Open(path, PdfDocumentOpenMode.Import)) c.Check("PDF is valid and paginates", pdf.PageCount > 1, $"{pdf.PageCount} pages");
                     break;
+                case ExportFormat.Plan:
+                    string plan = File.ReadAllText(path);
+                    c.Check("Plan consolidates shared remediation", plan.Contains("Remediation Plan", StringComparison.Ordinal) && plan.Contains("18 finding", StringComparison.Ordinal));
+                    c.Check("Plan includes the action guidance", plan.Contains("Review and repair", StringComparison.Ordinal));
+                    break;
             }
         }
         return Task.CompletedTask;
